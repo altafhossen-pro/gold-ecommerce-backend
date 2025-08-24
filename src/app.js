@@ -52,7 +52,16 @@ app.use('/api/v1', routes);
 app.get('/', (req, res) => {
     return res.status(200).json({
         success: true,
-        message: 'Welcome to IPTV Server',
+        message: 'Welcome to Forpink Server',
+        version: '1.0.0',
+        author: 'Forpink',
+        ip: req.ip,
+        port: process.env.PORT,
+        timestamp: new Date().toISOString(),
+        uptime: process.uptime(),
+        memoryUsage: process.memoryUsage(),
+        cpuUsage: process.cpuUsage(),
+        platform: process.platform,
     });
 });
 
