@@ -24,7 +24,9 @@ exports.createOrder = async (req, res) => {
 
 exports.getOrders = async (req, res) => {
   try {
-    const orders = await Order.find();
+    const orders = await Order.find()
+      .populate('user', 'name email phone')
+      .sort({ createdAt: -1 }); // Sort by newest first
     return sendResponse({
       res,
       statusCode: 200,
@@ -45,7 +47,7 @@ exports.getOrders = async (req, res) => {
 exports.getOrderById = async (req, res) => {
   try {
     const { id } = req.params;
-    const order = await Order.findById(id);
+    const order = await Order.findById(id).populate('user', 'name email phone');
     if (!order) {
       return sendResponse({
         res,

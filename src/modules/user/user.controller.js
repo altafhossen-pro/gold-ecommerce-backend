@@ -96,7 +96,7 @@ exports.login = async (req, res) => {
       });
     }
     // Generate JWT (dummy secret for now)
-    const token = jwt.sign({ userId: user._id }, 'your_jwt_secret', { expiresIn: '7d' });
+    const token = jwt.sign({ userId: user._id }, process.env.JWT_SECRET, { expiresIn: '7d' });
     const userObj = user.toObject();
     delete userObj.password;
     return sendResponse({
@@ -119,15 +119,7 @@ exports.login = async (req, res) => {
 exports.getProfile = async (req, res) => {
   try {
     // Assume req.userId is set by auth middleware
-    const user = await User.findById(req.userId).select('-password');
-    if (!user) {
-      return sendResponse({
-        res,
-        statusCode: 404,
-        success: false,
-        message: 'User not found',
-      });
-    }
+    const user = req.user;
     return sendResponse({
       res,
       statusCode: 200,

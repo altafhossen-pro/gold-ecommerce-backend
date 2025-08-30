@@ -1,6 +1,6 @@
 // middlewares/verifyToken.js
 const jwt = require('jsonwebtoken');
-const User = require('../models/User');
+const { User } = require('../modules/user/user.model');
 const sendResponse = require('../utils/sendResponse');
 
 const verifyToken = async (req, res, next) => {
@@ -40,7 +40,7 @@ const verifyToken = async (req, res, next) => {
         }
 
         // Verify token
-        const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-jwt-secret');
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
         if (!decoded.userId) {
             return sendResponse({
@@ -50,8 +50,7 @@ const verifyToken = async (req, res, next) => {
                 message: 'Invalid token payload'
             });
         }
-
-        // Find user in database
+        
         const user = await User.findById(decoded.userId).select('-password');
 
         if (!user) {
@@ -74,19 +73,7 @@ const verifyToken = async (req, res, next) => {
         }
 
         // Attach user to request object
-        req.user = {
-            userId: user._id,
-            sid: user.sid,
-            email: user.email,
-            name: user.name,
-            status: user.status,
-            avatar: user.avatar,
-            phone: user.phone,
-            last_login: user.last_login,
-            created_at: user.created_at
-        };
-
-        // Continue to next middleware/controller
+        req.user = user;
         next();
 
     } catch (error) {

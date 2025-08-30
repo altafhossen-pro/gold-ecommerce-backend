@@ -19,6 +19,7 @@ const getPaginatedProducts = async (filter, req, res, message) => {
 
     const total = await Product.countDocuments(queryFilter);
     const products = await Product.find(queryFilter)
+      .populate('category')
       .sort(sort)
       .skip(skip)
       .limit(limit);
@@ -85,6 +86,43 @@ exports.getNewArrivals = async (req, res) => {
 
 exports.getBestsellingProducts = async (req, res) => {
   return getPaginatedProducts({ isBestselling: true }, req, res, 'Bestselling products fetched successfully');
+};
+
+exports.getProductBySlug = async (req, res) => {
+  try {
+    const { slug } = req.params;
+    console.log('Searching for product with slug:', slug);
+    
+    const product = await Product.findOne({ slug })
+      .populate('category')
+      .populate('subCategories');
+      
+    console.log('Found product:', product ? product.title : 'Not found');
+    
+    if (!product) {
+      return sendResponse({
+        res,
+        statusCode: 404,
+        success: false,
+        message: 'Product not found',
+      });
+    }
+    return sendResponse({
+      res,
+      statusCode: 200,
+      success: true,
+      message: 'Product fetched successfully',
+      data: product,
+    });
+  } catch (error) {
+    console.error('Error in getProductBySlug:', error);
+    return sendResponse({
+      res,
+      statusCode: 500,
+      success: false,
+      message: error.message || 'Server error',
+    });
+  }
 };
 
 exports.getProductById = async (req, res) => {

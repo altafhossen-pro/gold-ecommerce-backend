@@ -18,6 +18,15 @@ const orderItemSchema = new mongoose.Schema({
     price: { type: Number, required: true },
     quantity: { type: Number, required: true },
     subtotal: { type: Number, required: true },
+    // Add variant information for admin
+    variant: {
+        size: { type: String },
+        color: { type: String },
+        colorHexCode: { type: String },
+        sku: { type: String },
+        stockQuantity: { type: Number },
+        stockStatus: { type: String }
+    }
 }, { _id: false });
 
 const trackingSchema = new mongoose.Schema({
@@ -27,7 +36,7 @@ const trackingSchema = new mongoose.Schema({
 }, { _id: false });
 
 const orderSchema = new mongoose.Schema({
-    user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }, // Made optional for guest orders
     items: [orderItemSchema],
     shippingAddress: addressSchema,
     billingAddress: addressSchema,

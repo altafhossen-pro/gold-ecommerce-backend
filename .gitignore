@@ -146,6 +146,9 @@ temp/
 *.tar.gz
 *.rar
 
+# Uploaded files
+uploads/
+
 # Config files (uncomment if needed)
 # config.json
 # settings.json
