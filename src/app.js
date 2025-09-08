@@ -10,38 +10,35 @@ const routes = require('./routes/index');
 dotenv.config();
 const app = express();
 
+// Allowed origins
 const allowedOrigins = [
     'http://localhost:3000',
     'http://127.0.0.1:3000',
     'http://64.227.133.212:3000'
 ];
 
-app.use((req, res, next) => {
-    const origin = req.headers.origin;
-    if (allowedOrigins.includes(origin)) {
-        res.setHeader('Access-Control-Allow-Origin', origin);
-        res.setHeader('Access-Control-Allow-Credentials', 'true');
-    }
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+// CORS setup
+const corsOptions = {
+    origin: function(origin, callback) {
+        if (!origin || allowedOrigins.includes(origin)) {
+            callback(null, true);
+        } else {
+            callback(new Error('Not allowed by CORS'));
+        }
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+};
 
-    if (req.method === 'OPTIONS') {
-        return res.status(200).end();
-    }
-    next();
-});
+// Apply CORS middleware
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions)); // preflight requests
+
 // Connect to MongoDB
 connectDB();
 
 // Middlewares
-app.use(cors({
-    origin: [
-        'http://localhost:3000',
-        'http://127.0.0.1:3000',
-        'http://64.227.133.212:3000',
-    ],
-    credentials: true
-}));
 app.use(express.json());
 app.use(morgan('dev'));
 app.use(express.urlencoded({ extended: true }));
@@ -52,6 +49,7 @@ app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 // Routes
 app.use('/api/v1', routes);
 
+// Root route
 app.get('/', (req, res) => {
     return res.status(200).json({
         success: true,
@@ -67,7 +65,6 @@ app.get('/', (req, res) => {
         platform: process.platform,
     });
 });
-
 
 // 404 Route
 app.use(notFound);
