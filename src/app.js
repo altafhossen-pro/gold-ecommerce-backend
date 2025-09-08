@@ -13,6 +13,9 @@ const app = express();
 const allowedOrigins = [
     'http://localhost:3000',
     'http://127.0.0.1:3000',
+    'http://64.227.133.212',
+    'http://forpink.com',
+    'https://forpink.com',
     'http://64.227.133.212:3000'
 ];
 
@@ -38,6 +41,9 @@ app.use(cors({
     origin: [
         'http://localhost:3000',
         'http://127.0.0.1:3000',
+        'http://64.227.133.212',
+        'http://forpink.com',
+        'https://forpink.com',
         'http://64.227.133.212:3000',
     ],
     credentials: true
