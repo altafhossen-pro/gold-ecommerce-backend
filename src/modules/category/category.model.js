@@ -5,6 +5,9 @@ const categorySchema = new mongoose.Schema({
   slug: { type: String, required: true, unique: true },
   image: { type: String },
   parent: { type: mongoose.Schema.Types.ObjectId, ref: 'Category', default: null },
+  isActive: { type: Boolean, default: true },
+  isFeatured: { type: Boolean, default: false },
+  sortOrder: { type: Number, default: 0 },
 }, {
   timestamps: true,
   toJSON: { virtuals: true },

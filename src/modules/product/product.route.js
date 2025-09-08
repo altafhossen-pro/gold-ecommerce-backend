@@ -7,6 +7,8 @@ router.get('/featured', productController.getFeaturedProducts);
 router.get('/discounted', productController.getDiscountedProducts);
 router.get('/new-arrivals', productController.getNewArrivals);
 router.get('/bestselling', productController.getBestsellingProducts);
+router.get('/search', productController.searchProducts);
+router.get('/filters', productController.getAvailableFilters);
 
 // CRUD
 router.post('/', productController.createProduct);
