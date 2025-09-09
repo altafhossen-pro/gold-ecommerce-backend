@@ -2,7 +2,7 @@
 const User = require('../models/User');
 const sendResponse = require('../utils/sendResponse');
 
-const adminAuth = async (req, res, next) => {
+const verifyTokenAdmin = async (req, res, next) => {
     try {
         // First verify the token (this should be called before adminAuth)
         if (!req.user || !req.user.userId) {
@@ -55,4 +55,4 @@ const adminAuth = async (req, res, next) => {
     }
 };
 
-module.exports = adminAuth; 
+module.exports = verifyTokenAdmin; 
