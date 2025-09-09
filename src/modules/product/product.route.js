@@ -9,6 +9,7 @@ router.get('/new-arrivals', productController.getNewArrivals);
 router.get('/bestselling', productController.getBestsellingProducts);
 router.get('/search', productController.searchProducts);
 router.get('/filters', productController.getAvailableFilters);
+router.get('/similar/:productId', productController.getSimilarProducts);
 
 // CRUD
 router.post('/', productController.createProduct);

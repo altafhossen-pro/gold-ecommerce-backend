@@ -502,3 +502,90 @@ exports.deleteProduct = async (req, res) => {
     });
   }
 };
+
+// Get similar products with smart fallback logic
+exports.getSimilarProducts = async (req, res) => {
+  try {
+    const { productId } = req.params;
+    const limit = parseInt(req.query.limit) || 8;
+    const minRequired = parseInt(req.query.minRequired) || 4;
+
+    // First, get the current product to find its category
+    const currentProduct = await Product.findById(productId).populate('category');
+    
+    if (!currentProduct) {
+      return sendResponse({
+        res,
+        statusCode: 404,
+        success: false,
+        message: 'Product not found',
+      });
+    }
+
+    let similarProducts = [];
+    let source = 'category'; // Track where products came from
+
+    // Step 1: Try to get products from the same category first
+    if (currentProduct.category) {
+      const categoryProducts = await Product.find({
+        _id: { $ne: productId }, // Exclude current product
+        category: currentProduct.category._id,
+        isActive: true
+      })
+      .populate('category')
+      .sort({ createdAt: -1 })
+      .limit(limit);
+
+      similarProducts = categoryProducts;
+      console.log(`Found ${categoryProducts.length} products from same category: ${currentProduct.category.name}`);
+    }
+
+    // Step 2: If we don't have enough products from same category, fill with products from all categories
+    if (similarProducts.length < minRequired) {
+      const remainingNeeded = limit - similarProducts.length;
+      
+      // Get additional products from all categories, excluding current product and already selected ones
+      const excludeIds = [productId, ...similarProducts.map(p => p._id)];
+      
+      const additionalProducts = await Product.find({
+        _id: { $nin: excludeIds },
+        isActive: true
+      })
+      .populate('category')
+      .sort({ createdAt: -1 })
+      .limit(remainingNeeded);
+
+      similarProducts = [...similarProducts, ...additionalProducts];
+      source = similarProducts.length > minRequired ? 'mixed' : 'all';
+      
+      console.log(`Added ${additionalProducts.length} products from all categories. Total: ${similarProducts.length}`);
+    }
+
+    // Ensure we don't exceed the limit
+    similarProducts = similarProducts.slice(0, limit);
+
+    return sendResponse({
+      res,
+      statusCode: 200,
+      success: true,
+      message: `Similar products fetched successfully (${source} source)`,
+      data: similarProducts,
+      meta: {
+        source,
+        totalFound: similarProducts.length,
+        categoryName: currentProduct.category?.name || 'Unknown',
+        requestedLimit: limit,
+        minRequired
+      }
+    });
+
+  } catch (error) {
+    console.error('Error fetching similar products:', error);
+    return sendResponse({
+      res,
+      statusCode: 500,
+      success: false,
+      message: error.message || 'Server error',
+    });
+  }
+};
