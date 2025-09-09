@@ -13,7 +13,11 @@ exports.createCategory = async (req, res) => {
         message: 'Name and slug are required',
       });
     }
-    const category = new Category({ name, slug, image, parent: parent || null });
+    
+    // Handle empty parent field - convert empty string to null
+    const parentValue = (parent === '' || !parent) ? null : parent;
+    
+    const category = new Category({ name, slug, image, parent: parentValue });
     await category.save();
     return sendResponse({
       res,
@@ -475,6 +479,12 @@ exports.updateCategory = async (req, res) => {
   try {
     const { id } = req.params;
     const updates = req.body;
+    
+    // Handle empty parent field - convert empty string to null
+    if (updates.parent === '') {
+      updates.parent = null;
+    }
+    
     const category = await Category.findByIdAndUpdate(id, updates, { new: true }).populate('parent').populate('children');
     if (!category) {
       return sendResponse({
