@@ -4,7 +4,7 @@ const mongoose = require('mongoose');
 
 exports.createCategory = async (req, res) => {
   try {
-    const { name, slug, image, parent } = req.body;
+    const { name, slug, image, parent, isFeatured } = req.body;
     if (!name || !slug) {
       return sendResponse({
         res,
@@ -17,7 +17,13 @@ exports.createCategory = async (req, res) => {
     // Handle empty parent field - convert empty string to null
     const parentValue = (parent === '' || !parent) ? null : parent;
     
-    const category = new Category({ name, slug, image, parent: parentValue });
+    const category = new Category({ 
+      name, 
+      slug, 
+      image, 
+      parent: parentValue,
+      isFeatured: isFeatured || false
+    });
     await category.save();
     return sendResponse({
       res,
@@ -483,6 +489,11 @@ exports.updateCategory = async (req, res) => {
     // Handle empty parent field - convert empty string to null
     if (updates.parent === '') {
       updates.parent = null;
+    }
+    
+    // Handle isFeatured field - ensure it's boolean
+    if (updates.isFeatured !== undefined) {
+      updates.isFeatured = Boolean(updates.isFeatured);
     }
     
     const category = await Category.findByIdAndUpdate(id, updates, { new: true }).populate('parent').populate('children');

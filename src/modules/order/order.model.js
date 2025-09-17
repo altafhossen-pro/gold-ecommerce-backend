@@ -36,6 +36,7 @@ const trackingSchema = new mongoose.Schema({
 }, { _id: false });
 
 const orderSchema = new mongoose.Schema({
+    orderId: { type: String, unique: true, index: true }, 
     user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }, // Made optional for guest orders
     items: [orderItemSchema],
     shippingAddress: addressSchema,
@@ -69,6 +70,34 @@ orderSchema.index({ user: 1 });
 orderSchema.index({ status: 1 });
 orderSchema.index({ createdAt: -1 });
 
+// Function to generate 6-digit order ID
+const generateOrderId = async () => {
+    let orderId;
+    let isUnique = false;
+    
+    while (!isUnique) {
+        // Generate 6-digit number
+        orderId = Math.floor(100000 + Math.random() * 900000).toString();
+        
+        // Check if it already exists
+        const existingOrder = await mongoose.model('Order').findOne({ orderId });
+        if (!existingOrder) {
+            isUnique = true;
+        }
+    }
+    
+    return orderId;
+};
+
+// Pre-save middleware to generate orderId
+orderSchema.pre('save', async function(next) {
+    // Always generate orderId if it doesn't exist
+    if (!this.orderId) {
+        this.orderId = await generateOrderId();
+    }
+    next();
+});
+
 const Order = mongoose.model('Order', orderSchema);
 
-module.exports = { Order };
+module.exports = { Order, generateOrderId };

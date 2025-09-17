@@ -12,10 +12,11 @@ const addressSchema = new mongoose.Schema({
 
 const userSchema = new mongoose.Schema({
   name: { type: String, required: true },
-  phone: { type: String, required: true, unique: true },
-  email: { type: String, required: true, unique: true, lowercase: true },
+  phone: { type: String, required: true, unique: true, index: true },
+  email: { type: String, required: true, unique: true, lowercase: true, index: true },
   password: { type: String, required: true },
   avatar: { type: String },
+  address: { type: String },
   addresses: [addressSchema],
   role: {
     type: String,
@@ -24,9 +25,11 @@ const userSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ['active', 'inactive', 'banned'],
+    enum: ['active', 'inactive', 'banned', 'deleted'],
     default: 'active',
+    index: true,
   },
+  deletedAt: { type: Date },
   emailVerified: { type: Boolean, default: false },
   phoneVerified: { type: Boolean, default: false },
   lastLogin: { type: Date },
@@ -42,10 +45,6 @@ const userSchema = new mongoose.Schema({
 }, {
   timestamps: true,
 });
-
-userSchema.index({ email: 1 });
-userSchema.index({ phone: 1 });
-userSchema.index({ status: 1 });
 
 const User = mongoose.model('User', userSchema);
 

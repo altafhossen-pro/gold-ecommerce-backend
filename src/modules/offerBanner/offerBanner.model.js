@@ -19,7 +19,8 @@ const offerBannerSchema = new mongoose.Schema({
         required: true,
         unique: true,
         trim: true,
-        uppercase: true
+        uppercase: true,
+        index: true
     },
     image: {
         type: String,
@@ -106,7 +107,6 @@ const offerBannerSchema = new mongoose.Schema({
 // Indexes
 offerBannerSchema.index({ isActive: 1, startDate: 1, endDate: 1 });
 offerBannerSchema.index({ priority: 1 });
-offerBannerSchema.index({ promoCode: 1 });
 
 // Virtual for checking if banner is currently active
 offerBannerSchema.virtual('isCurrentlyActive').get(function() {

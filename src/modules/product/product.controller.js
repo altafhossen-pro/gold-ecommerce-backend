@@ -100,12 +100,10 @@ exports.getAvailableFilters = async (req, res) => {
       queryFilter.category = { $in: categoryIds };
     }
 
-    console.log('Query filter:', JSON.stringify(queryFilter, null, 2));
 
     // Get all products matching the filter
     const products = await Product.find(queryFilter).select('isBracelet isRing braceletSizes ringSizes');
 
-    console.log('Found products count:', products.length);
 
     // Count products with bracelet and ring types
     let hasBracelets = 0;
@@ -149,14 +147,6 @@ exports.getAvailableFilters = async (req, res) => {
     const showBraceletFilter = hasBracelets > 0;
     const showRingFilter = hasRings > 0;
 
-    console.log('Filter data:', {
-      hasBracelets,
-      hasRings,
-      showBraceletFilter,
-      showRingFilter,
-      braceletSizes: uniqueBraceletSizes,
-      ringSizes: uniqueRingSizes
-    });
 
     return sendResponse({
       res,
@@ -382,13 +372,12 @@ exports.searchProducts = async (req, res) => {
 exports.getProductBySlug = async (req, res) => {
   try {
     const { slug } = req.params;
-    console.log('Searching for product with slug:', slug);
 
     const product = await Product.findOne({ slug })
       .populate('category')
       .populate('subCategories');
 
-    console.log('Found product:', product ? product.title : 'Not found');
+    
 
     if (!product) {
       return sendResponse({
@@ -537,7 +526,7 @@ exports.getSimilarProducts = async (req, res) => {
       .limit(limit);
 
       similarProducts = categoryProducts;
-      console.log(`Found ${categoryProducts.length} products from same category: ${currentProduct.category.name}`);
+      
     }
 
     // Step 2: If we don't have enough products from same category, fill with products from all categories
@@ -558,7 +547,7 @@ exports.getSimilarProducts = async (req, res) => {
       similarProducts = [...similarProducts, ...additionalProducts];
       source = similarProducts.length > minRequired ? 'mixed' : 'all';
       
-      console.log(`Added ${additionalProducts.length} products from all categories. Total: ${similarProducts.length}`);
+      
     }
 
     // Ensure we don't exceed the limit

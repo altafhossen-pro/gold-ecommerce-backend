@@ -2,7 +2,7 @@ const mongoose = require('mongoose');
 
 const categorySchema = new mongoose.Schema({
   name: { type: String, required: true },
-  slug: { type: String, required: true, unique: true },
+  slug: { type: String, required: true, unique: true, index: true },
   image: { type: String },
   parent: { type: mongoose.Schema.Types.ObjectId, ref: 'Category', default: null },
   isActive: { type: Boolean, default: true },
@@ -23,7 +23,6 @@ categorySchema.virtual('children', {
 });
 
 // Index for slug and parent for efficient lookups
-categorySchema.index({ slug: 1 });
 categorySchema.index({ parent: 1 });
 
 const Category = mongoose.model('Category', categorySchema);

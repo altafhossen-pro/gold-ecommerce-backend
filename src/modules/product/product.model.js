@@ -26,7 +26,7 @@ const variantAttributeSchema = new mongoose.Schema({
 
 // Product Variant Schema
 const productVariantSchema = new mongoose.Schema({
-  sku: { type: String, required: true, unique: true },
+  sku: { type: String, required: true, unique: true, index: true },
   barcode: { type: String },
   attributes: [variantAttributeSchema],
   currentPrice: { type: Number, required: true },
@@ -148,17 +148,15 @@ const productSchema = new mongoose.Schema({
   seo: seoSchema,
   createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   updatedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-  slug: { type: String, required: true, unique: true },
+  slug: { type: String, required: true, unique: true, index: true },
 }, {
   timestamps: true,
   toJSON: { virtuals: true },
   toObject: { virtuals: true },
 });
 
-productSchema.index({ slug: 1 });
 productSchema.index({ category: 1 });
 productSchema.index({ status: 1, isActive: 1 });
-productSchema.index({ 'variants.sku': 1 });
 productSchema.index({ tags: 1 });
 productSchema.index({ createdAt: -1 });
 productSchema.index({ averageRating: -1 });
