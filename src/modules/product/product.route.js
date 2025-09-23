@@ -11,6 +11,9 @@ router.get('/search', productController.searchProducts);
 router.get('/filters', productController.getAvailableFilters);
 router.get('/similar/:productId', productController.getSimilarProducts);
 
+// Stock checking
+router.post('/check-stock', productController.checkStockAvailability);
+
 // CRUD
 router.post('/', productController.createProduct);
 router.get('/', productController.getProducts);

@@ -1,7 +1,7 @@
 const { User } = require('./user.model');
 const bcrypt = require('bcryptjs');
 const sendResponse = require('../../utils/sendResponse');
-const jwt = require('jsonwebtoken'); // Assume JWT is used for login
+const jwtService = require('../../services/jwtService');
 
 exports.signup = async (req, res) => {
   try {
@@ -95,8 +95,8 @@ exports.login = async (req, res) => {
         message: 'Invalid credentials',
       });
     }
-    // Generate JWT (dummy secret for now)
-    const token = jwt.sign({ userId: user._id }, process.env.JWT_SECRET, { expiresIn: '7d' });
+    // Generate JWT token using service
+    const token = jwtService.generateAccessToken(user._id);
     const userObj = user.toObject();
     delete userObj.password;
     return sendResponse({

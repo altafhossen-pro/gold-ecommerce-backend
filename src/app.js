@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const morgan = require('morgan');
 const path = require('path');
+const expressSyncHelper = require('express-sync-helper');
 const connectDB = require('./config/db');
 const { globalErrorHandler, notFound } = require('./utils/errorHandler');
 const dotenv = require('dotenv');
@@ -53,6 +54,8 @@ app.use(cors({
 app.use(express.json({ limit: '10mb' }));
 app.use(morgan('dev'));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+app.use(expressSyncHelper());
 
 
 // Serve static files from uploads directory

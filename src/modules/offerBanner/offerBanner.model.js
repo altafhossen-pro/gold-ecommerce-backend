@@ -3,152 +3,66 @@ const mongoose = require('mongoose');
 const offerBannerSchema = new mongoose.Schema({
     title: {
         type: String,
-        required: true,
-        trim: true
+        required: [true, 'Title is required'],
+        trim: true,
+        maxlength: [100, 'Title cannot exceed 100 characters']
     },
     subtitle: {
         type: String,
-        trim: true
-    },
-    description: {
-        type: String,
-        trim: true
-    },
-    promoCode: {
-        type: String,
-        required: true,
-        unique: true,
+        required: [true, 'Subtitle is required'],
         trim: true,
-        uppercase: true,
-        index: true
+        maxlength: [200, 'Subtitle cannot exceed 200 characters']
     },
     image: {
         type: String,
-        required: true
+        required: [true, 'Image is required']
     },
-    backgroundColor: {
+    type: {
         type: String,
-        default: '#fce7f3' // Light pink default
+        enum: ['offer', 'promo'],
+        required: true,
+        default: 'offer'
     },
-    textColor: {
+    buttonText: {
         type: String,
-        default: '#000000'
+        trim: true,
+        maxlength: [50, 'Button text cannot exceed 50 characters']
     },
-    promoCodeColor: {
+    buttonLink: {
         type: String,
-        default: '#ec4899' // Pink default
+        trim: true
+    },
+    discountPercentage: {
+        type: Number,
+        min: [0, 'Discount percentage cannot be negative'],
+        max: [100, 'Discount percentage cannot exceed 100']
+    },
+    discountText: {
+        type: String,
+        trim: true,
+        maxlength: [50, 'Discount text cannot exceed 50 characters']
     },
     isActive: {
         type: Boolean,
         default: true
-    },
-    isRedirect: {
-        type: Boolean,
-        default: false
-    },
-    redirectUrl: {
-        type: String,
-        trim: true
-    },
-    startDate: {
-        type: Date,
-        required: true
-    },
-    endDate: {
-        type: Date,
-        required: true
-    },
-    priority: {
-        type: Number,
-        default: 1,
-        min: 1,
-        max: 10
-    },
-    clickCount: {
-        type: Number,
-        default: 0
-    },
-    targetAudience: {
-        type: String,
-        enum: ['all', 'new_customers', 'existing_customers', 'vip_customers'],
-        default: 'all'
-    },
-    conditions: {
-        minOrderAmount: {
-            type: Number,
-            default: 0
-        },
-        maxDiscountAmount: {
-            type: Number
-        },
-        applicableCategories: [{
-            type: mongoose.Schema.Types.ObjectId,
-            ref: 'Category'
-        }],
-        applicableProducts: [{
-            type: mongoose.Schema.Types.ObjectId,
-            ref: 'Product'
-        }]
-    },
-    createdBy: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'User'
-    },
-    updatedBy: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'User'
     }
 }, {
-    timestamps: true,
-    toJSON: { virtuals: true },
-    toObject: { virtuals: true }
+    timestamps: true
 });
 
-// Indexes
-offerBannerSchema.index({ isActive: 1, startDate: 1, endDate: 1 });
-offerBannerSchema.index({ priority: 1 });
+// Index for active banners
+offerBannerSchema.index({ isActive: 1 });
 
-// Virtual for checking if banner is currently active
-offerBannerSchema.virtual('isCurrentlyActive').get(function() {
-    const now = new Date();
-    return this.isActive && 
-           this.startDate <= now && 
-           this.endDate >= now;
-});
-
-// Virtual for days remaining
-offerBannerSchema.virtual('daysRemaining').get(function() {
-    const now = new Date();
-    const endDate = new Date(this.endDate);
-    const diffTime = endDate - now;
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-    return diffDays > 0 ? diffDays : 0;
-});
-
-// Pre-save middleware to validate dates
-offerBannerSchema.pre('save', function(next) {
-    if (this.startDate >= this.endDate) {
-        return next(new Error('Start date must be before end date'));
+// Ensure only one active banner at a time
+offerBannerSchema.pre('save', async function(next) {
+    if (this.isActive) {
+        // Deactivate all other banners
+        await this.constructor.updateMany(
+            { _id: { $ne: this._id }, isActive: true },
+            { isActive: false }
+        );
     }
     next();
 });
 
-// Static method to get active banners
-offerBannerSchema.statics.getActiveBanners = function() {
-    const now = new Date();
-    return this.find({
-        isActive: true,
-        startDate: { $lte: now },
-        endDate: { $gte: now }
-    }).sort({ priority: 1, createdAt: -1 });
-};
-
-// Instance method to increment click count
-offerBannerSchema.methods.incrementClickCount = function() {
-    this.clickCount += 1;
-    return this.save();
-};
-
-const OfferBanner = mongoose.model('OfferBanner', offerBannerSchema);
-
-module.exports = { OfferBanner };
+module.exports = mongoose.model('OfferBanner', offerBannerSchema);

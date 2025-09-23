@@ -492,6 +492,124 @@ exports.deleteProduct = async (req, res) => {
   }
 };
 
+// Check stock availability for cart items
+exports.checkStockAvailability = async (req, res) => {
+  try {
+    const { cartItems } = req.body;
+
+    if (!cartItems || !Array.isArray(cartItems)) {
+      return sendResponse({
+        res,
+        statusCode: 400,
+        success: false,
+        message: 'Cart items array is required',
+      });
+    }
+
+    const stockCheckResults = [];
+
+    for (const cartItem of cartItems) {
+      try {
+        const product = await Product.findById(cartItem.productId);
+        
+        if (!product) {
+          stockCheckResults.push({
+            cartItemId: cartItem.id,
+            productId: cartItem.productId,
+            isAvailable: false,
+            availableStock: 0,
+            requestedQuantity: cartItem.quantity,
+            reason: 'Product not found'
+          });
+          continue;
+        }
+
+        // Check if product has variants
+        if (product.variants && product.variants.length > 0) {
+          // Find the specific variant
+          const variant = product.variants.find(v => v.sku === cartItem.sku);
+          
+          if (!variant) {
+            stockCheckResults.push({
+              cartItemId: cartItem.id,
+              productId: cartItem.productId,
+              sku: cartItem.sku,
+              isAvailable: false,
+              availableStock: 0,
+              requestedQuantity: cartItem.quantity,
+              reason: 'Variant not found'
+            });
+            continue;
+          }
+
+          const availableStock = variant.stockQuantity || 0;
+          const isAvailable = availableStock >= cartItem.quantity;
+
+          stockCheckResults.push({
+            cartItemId: cartItem.id,
+            productId: cartItem.productId,
+            sku: cartItem.sku,
+            isAvailable,
+            availableStock,
+            requestedQuantity: cartItem.quantity,
+            reason: isAvailable ? 'In stock' : 'Insufficient stock'
+          });
+        } else {
+          // Product without variants - check totalStock
+          const availableStock = product.totalStock || 0;
+          const isAvailable = availableStock >= cartItem.quantity;
+
+          stockCheckResults.push({
+            cartItemId: cartItem.id,
+            productId: cartItem.productId,
+            isAvailable,
+            availableStock,
+            requestedQuantity: cartItem.quantity,
+            reason: isAvailable ? 'In stock' : 'Insufficient stock'
+          });
+        }
+      } catch (itemError) {
+        console.error('Error checking stock for item:', cartItem, itemError);
+        stockCheckResults.push({
+          cartItemId: cartItem.id,
+          productId: cartItem.productId,
+          isAvailable: false,
+          availableStock: 0,
+          requestedQuantity: cartItem.quantity,
+          reason: 'Error checking stock'
+        });
+      }
+    }
+
+    // Check if any items are out of stock
+    const outOfStockItems = stockCheckResults.filter(item => !item.isAvailable);
+    const allItemsInStock = outOfStockItems.length === 0;
+
+    return sendResponse({
+      res,
+      statusCode: 200,
+      success: true,
+      message: allItemsInStock ? 'All items are in stock' : 'Some items are out of stock',
+      data: {
+        stockCheckResults,
+        allItemsInStock,
+        outOfStockItems,
+        totalItems: cartItems.length,
+        outOfStockCount: outOfStockItems.length
+      }
+    });
+
+  } catch (error) {
+    console.error('Error checking stock availability:', error);
+    return sendResponse({
+      res,
+      statusCode: 500,
+      success: false,
+      message: error.message || 'Server error',
+    });
+  }
+};
+
 // Get similar products with smart fallback logic
 exports.getSimilarProducts = async (req, res) => {
   try {

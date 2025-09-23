@@ -10,5 +10,6 @@ router.get('/user/:orderId', verifyToken, orderController.getUserOrderById);
 router.get('/:id', orderController.getOrderById);
 router.patch('/:id', orderController.updateOrder);
 router.delete('/:id', orderController.deleteOrder);
+router.post('/update-total-sold', orderController.updateTotalSold);
 
 module.exports = router;

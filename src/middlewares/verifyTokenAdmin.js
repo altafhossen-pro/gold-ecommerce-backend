@@ -1,7 +1,7 @@
 
 const { User } = require('../modules/user/user.model');
 const sendResponse = require('../utils/sendResponse');
-const jwt = require('jsonwebtoken');
+const jwtService = require('../services/jwtService');
 
 const verifyTokenAdmin = async (req, res, next) => {
     try {
@@ -38,17 +38,8 @@ const verifyTokenAdmin = async (req, res, next) => {
             });
         }
 
-        // Verify token
-        const decoded = jwt.verify(token, process.env.JWT_SECRET);
-
-        if (!decoded.userId) {
-            return sendResponse({
-                res,
-                statusCode: 401,
-                success: false,
-                message: 'Invalid token payload'
-            });
-        }
+        // Verify admin token using service
+        const decoded = jwtService.verifyAdminToken(token);
 
         const user = await User.findById(decoded.userId).select('-password');
 

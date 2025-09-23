@@ -1,5 +1,6 @@
 const { User } = require('../../../modules/user/user.model');
 const sendResponse = require('../../../utils/sendResponse');
+const jwtService = require('../../../services/jwtService');
 
 exports.listUsers = async (req, res) => {
   try {
@@ -47,5 +48,71 @@ exports.createUser = async (req, res) => {
     return sendResponse({ res, statusCode: 201, success: true, message: 'User created', data: user });
   } catch (error) {
     return sendResponse({ res, statusCode: 500, success: false, message: error.message });
+  }
+};
+
+// Admin login function
+exports.adminLogin = async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    if (!email || !password) {
+      return sendResponse({
+        res,
+        statusCode: 400,
+        success: false,
+        message: 'Email and password are required',
+      });
+    }
+
+    // Find admin user
+    const admin = await User.findOne({ email, role: 'admin' });
+    if (!admin) {
+      return sendResponse({
+        res,
+        statusCode: 401,
+        success: false,
+        message: 'Invalid admin credentials',
+      });
+    }
+
+    // Verify password
+    const bcrypt = require('bcryptjs');
+    const isPasswordValid = await bcrypt.compare(password, admin.password);
+    if (!isPasswordValid) {
+      return sendResponse({
+        res,
+        statusCode: 401,
+        success: false,
+        message: 'Invalid admin credentials',
+      });
+    }
+
+    // Generate admin token
+    const token = jwtService.generateAdminToken(admin._id, admin.role, ['all']);
+
+    // Remove password from response
+    const adminObj = admin.toObject();
+    delete adminObj.password;
+
+    return sendResponse({
+      res,
+      statusCode: 200,
+      success: true,
+      message: 'Admin login successful',
+      data: { 
+        admin: adminObj, 
+        token 
+      },
+    });
+
+  } catch (error) {
+    console.error('Admin login error:', error);
+    return sendResponse({
+      res,
+      statusCode: 500,
+      success: false,
+      message: error.message || 'Server error',
+    });
   }
 };

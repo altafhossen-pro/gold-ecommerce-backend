@@ -1,5 +1,5 @@
 // middlewares/verifyToken.js
-const jwt = require('jsonwebtoken');
+const jwtService = require('../services/jwtService');
 const { User } = require('../modules/user/user.model');
 const sendResponse = require('../utils/sendResponse');
 
@@ -39,8 +39,8 @@ const verifyToken = async (req, res, next) => {
             });
         }
 
-        // Verify token
-        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        // Verify token using service
+        const decoded = jwtService.verifyToken(token);
 
         if (!decoded.userId) {
             return sendResponse({
