@@ -95,9 +95,21 @@ exports.getAvailableFilters = async (req, res) => {
 
     let queryFilter = { isActive: true };
 
-    // If categories are selected, filter by those categories
+    // If categories are selected, filter by those categories including child categories
     if (categoryIds.length > 0) {
-      queryFilter.category = { $in: categoryIds };
+      // Get all child categories for the selected parent categories
+      const { Category } = require('../category/category.model');
+      const childCategories = await Category.find({
+        parent: { $in: categoryIds }
+      }).select('_id');
+      
+      // Combine parent and child category IDs
+      const allCategoryIds = [
+        ...categoryIds,
+        ...childCategories.map(child => child._id.toString())
+      ];
+      
+      queryFilter.category = { $in: allCategoryIds };
     }
 
 
@@ -162,7 +174,6 @@ exports.getAvailableFilters = async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Error getting available filters:', error);
     return sendResponse({
       res,
       statusCode: 500,
@@ -207,7 +218,20 @@ exports.searchProducts = async (req, res) => {
     // Additional filters
     if (req.query.category) {
       const categoryIds = req.query.category.split(',').map(id => id.trim());
-      queryFilter.category = { $in: categoryIds };
+      
+      // Get all child categories for the selected parent categories
+      const { Category } = require('../category/category.model');
+      const childCategories = await Category.find({
+        parent: { $in: categoryIds }
+      }).select('_id');
+      
+      // Combine parent and child category IDs
+      const allCategoryIds = [
+        ...categoryIds,
+        ...childCategories.map(child => child._id.toString())
+      ];
+      
+      queryFilter.category = { $in: allCategoryIds };
     }
 
     if (req.query.brand) queryFilter.brand = req.query.brand;
@@ -327,7 +351,6 @@ exports.searchProducts = async (req, res) => {
 
         products = await Product.aggregate(pipeline);
       } catch (aggregationError) {
-        console.error('Aggregation pipeline error:', aggregationError);
         // Fallback to simple search if aggregation fails
         total = await Product.countDocuments(queryFilter);
         products = await Product.find(queryFilter)
@@ -395,7 +418,6 @@ exports.getProductBySlug = async (req, res) => {
       data: product,
     });
   } catch (error) {
-    console.error('Error in getProductBySlug:', error);
     return sendResponse({
       res,
       statusCode: 500,
@@ -569,7 +591,6 @@ exports.checkStockAvailability = async (req, res) => {
           });
         }
       } catch (itemError) {
-        console.error('Error checking stock for item:', cartItem, itemError);
         stockCheckResults.push({
           cartItemId: cartItem.id,
           productId: cartItem.productId,
@@ -600,7 +621,6 @@ exports.checkStockAvailability = async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Error checking stock availability:', error);
     return sendResponse({
       res,
       statusCode: 500,
@@ -687,7 +707,6 @@ exports.getSimilarProducts = async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Error fetching similar products:', error);
     return sendResponse({
       res,
       statusCode: 500,

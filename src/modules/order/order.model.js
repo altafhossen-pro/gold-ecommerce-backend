@@ -54,10 +54,23 @@ const orderSchema = new mongoose.Schema({
     },
     total: { type: Number, required: true },
     discount: { type: Number, default: 0 },
+    loyaltyDiscount: { type: Number, default: 0 },
+    loyaltyPointsUsed: { type: Number, default: 0 },
     shippingCost: { type: Number, default: 0 },
     orderNotes: { type: String },
     tracking: [trackingSchema],
+    // Status timestamps for tracking
+    statusTimestamps: {
+        pending: { type: Date, default: Date.now },
+        confirmed: { type: Date },
+        processing: { type: Date },
+        shipped: { type: Date },
+        delivered: { type: Date },
+        cancelled: { type: Date },
+        returned: { type: Date }
+    },
     coupon: { type: String },
+    couponDiscount: { type: Number, default: 0 },
     refundedAmount: { type: Number, default: 0 },
     isGift: { type: Boolean, default: false },
     giftMessage: { type: String },

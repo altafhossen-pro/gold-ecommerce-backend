@@ -1,11 +1,15 @@
 const express = require('express');
 const router = express.Router();
 const loyaltyController = require('./loyalty.controller');
+const verifyToken = require('../../middlewares/verifyToken');
 
 router.get('/', loyaltyController.getLoyalty);
-router.post('/earn', loyaltyController.earnPoints);
-router.post('/redeem', loyaltyController.redeemPoints);
-router.get('/history', loyaltyController.getHistory);
-router.post('/adjust', loyaltyController.adjustPoints);
+router.post('/earn', verifyToken, loyaltyController.earnPoints);
+router.post('/redeem', verifyToken, loyaltyController.redeemPoints);
+router.get('/history', verifyToken, loyaltyController.getHistory);
+router.post('/adjust', verifyToken, loyaltyController.adjustPoints);
+
+// New route for coin redemption during checkout
+router.post('/redeem-coins', verifyToken, loyaltyController.redeemCoinsForCheckout);
 
 module.exports = router;

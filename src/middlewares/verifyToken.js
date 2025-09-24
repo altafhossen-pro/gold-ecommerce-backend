@@ -26,7 +26,7 @@ const verifyToken = async (req, res, next) => {
                 message: 'Invalid token format. Use Bearer token'
             });
         }
-
+        
         // Extract token
         const token = authHeader.substring(7); // Remove "Bearer " prefix
 
@@ -38,7 +38,7 @@ const verifyToken = async (req, res, next) => {
                 message: 'Access token is required'
             });
         }
-
+        
         // Verify token using service
         const decoded = jwtService.verifyToken(token);
 
@@ -50,7 +50,7 @@ const verifyToken = async (req, res, next) => {
                 message: 'Invalid token payload'
             });
         }
-        
+
         const user = await User.findById(decoded.userId).select('-password');
 
         if (!user) {

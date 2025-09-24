@@ -1,12 +1,18 @@
 const express = require('express');
 const router = express.Router();
 const couponController = require('./coupon.controller');
+const verifyToken = require('../../middlewares/verifyToken');
+const verifyTokenAdmin = require('../../middlewares/verifyTokenAdmin');
 
-router.post('/', couponController.createCoupon);
-router.get('/', couponController.getCoupons);
-router.get('/:id', couponController.getCouponById);
-router.put('/:id', couponController.updateCoupon);
-router.delete('/:id', couponController.deleteCoupon);
-router.post('/validate', couponController.validateAndApplyCoupon);
+// Public routes
+router.post('/validate', couponController.validateCoupon);
+
+// Admin routes (protected)
+router.get('/', verifyToken, verifyTokenAdmin, couponController.getAllCoupons);
+router.get('/:id', verifyToken, verifyTokenAdmin, couponController.getCouponById);
+router.post('/', verifyToken, verifyTokenAdmin, couponController.createCoupon);
+router.put('/:id', verifyToken, verifyTokenAdmin, couponController.updateCoupon);
+router.delete('/:id', verifyToken, verifyTokenAdmin, couponController.deleteCoupon);
+router.patch('/:id/toggle-status', verifyToken, verifyTokenAdmin, couponController.toggleCouponStatus);
 
 module.exports = router;

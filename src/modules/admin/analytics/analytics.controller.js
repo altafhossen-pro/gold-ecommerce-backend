@@ -2,7 +2,7 @@ const { User } = require('../../user/user.model');
 const { Order } = require('../../order/order.model');
 const { Product } = require('../../product/product.model');
 const { Category } = require('../../category/category.model');
-const { Coupon } = require('../../coupon/coupon.model');
+const Coupon = require('../../coupon/coupon.model');
 const sendResponse = require('../../../utils/sendResponse');
 
 // Get comprehensive dashboard statistics

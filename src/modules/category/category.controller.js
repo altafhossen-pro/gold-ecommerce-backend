@@ -133,7 +133,7 @@ exports.getCategories = async (req, res) => {
   return getPaginatedCategories({}, req, res, 'Categories fetched successfully');
 };
 
-// Get only main/parent categories (no children)
+// Get only main/parent categories (no children) with total product count including child categories
 exports.getMainCategories = async (req, res) => {
   try {
     const categories = await Category.aggregate([
@@ -148,12 +148,33 @@ exports.getMainCategories = async (req, res) => {
           from: 'products',
           localField: '_id',
           foreignField: 'category',
-          as: 'products'
+          as: 'directProducts'
+        }
+      },
+      {
+        $lookup: {
+          from: 'categories',
+          localField: '_id',
+          foreignField: 'parent',
+          as: 'childCategories'
+        }
+      },
+      {
+        $lookup: {
+          from: 'products',
+          localField: 'childCategories._id',
+          foreignField: 'category',
+          as: 'childProducts'
         }
       },
       {
         $addFields: {
-          productCount: { $size: '$products' }
+          productCount: { 
+            $add: [
+              { $size: '$directProducts' },
+              { $size: '$childProducts' }
+            ]
+          }
         }
       },
       {
@@ -276,24 +297,54 @@ exports.getPaginatedMainCategories = async (req, res) => {
   }
 };
 
-// Get categories for homepage (limited, active categories)
+// Get categories for homepage (limited, active parent categories only)
 exports.getHomepageCategories = async (req, res) => {
   try {
     const limit = parseInt(req.query.limit) || 10;
     
-    // Get categories with product counts
+    // Get only parent categories (no parent field or parent is null)
     const categories = await Category.aggregate([
       {
+        $match: { 
+          isActive: true,
+          $or: [
+            { parent: { $exists: false } },
+            { parent: null }
+          ]
+        }
+      },
+      {
         $lookup: {
-          from: 'products', // Assuming your product collection name is 'products'
+          from: 'products',
           localField: '_id',
           foreignField: 'category',
-          as: 'products'
+          as: 'directProducts'
+        }
+      },
+      {
+        $lookup: {
+          from: 'categories',
+          localField: '_id',
+          foreignField: 'parent',
+          as: 'childCategories'
+        }
+      },
+      {
+        $lookup: {
+          from: 'products',
+          localField: 'childCategories._id',
+          foreignField: 'category',
+          as: 'childProducts'
         }
       },
       {
         $addFields: {
-          productCount: { $size: '$products' }
+          productCount: { 
+            $add: [
+              { $size: '$directProducts' },
+              { $size: '$childProducts' }
+            ]
+          }
         }
       },
       {
@@ -549,3 +600,4 @@ exports.deleteCategory = async (req, res) => {
     });
   }
 };
+

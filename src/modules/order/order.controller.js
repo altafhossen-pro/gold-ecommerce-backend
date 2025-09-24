@@ -1,5 +1,7 @@
 const { Order } = require('./order.model');
 const { Product } = require('../product/product.model');
+const { earnCoinsFromOrder, redeemPoints } = require('../loyalty/loyalty.controller');
+const { incrementCouponUsage } = require('../coupon/coupon.controller');
 const sendResponse = require('../../utils/sendResponse');
 
 exports.createOrder = async (req, res) => {
@@ -8,8 +10,60 @@ exports.createOrder = async (req, res) => {
     const orderData = { ...req.body };
     delete orderData.orderId;
     
+    // Set user from authenticated token
+    orderData.user = req.user._id;
+    
+    // If order is paid with loyalty points, set payment status to 'paid' and status to 'confirmed'
+    if (orderData.loyaltyPointsUsed && orderData.loyaltyPointsUsed > 0) {
+      orderData.paymentStatus = 'paid';
+      orderData.status = 'confirmed';
+      orderData.statusTimestamps = {
+        ...orderData.statusTimestamps,
+        confirmed: new Date()
+      };
+    }
+    
     const order = new Order(orderData);
     await order.save();
+    
+    // Handle coupon usage increment
+    if (orderData.coupon) {
+      try {
+        const { Coupon } = require('../coupon/coupon.model');
+        await Coupon.findOneAndUpdate(
+          { code: orderData.coupon },
+          { $inc: { usedCount: 1 } }
+        );
+      } catch (couponError) {
+        // Don't fail the order creation if coupon increment fails
+      }
+    }
+    
+    // Handle loyalty points redemption after order creation
+    if (orderData.loyaltyPointsUsed && orderData.loyaltyPointsUsed > 0) {
+      try {
+        const { Loyalty } = require('../loyalty/loyalty.model');
+        const loyalty = await Loyalty.findOne({ user: req.user._id });
+        
+        if (loyalty) {
+          // Deduct coins
+          loyalty.coins -= orderData.loyaltyPointsUsed;
+          
+          // Add history entry with actual order ID
+          loyalty.history.unshift({
+            type: 'redeem',
+            points: 0,
+            coins: orderData.loyaltyPointsUsed,
+            order: order._id,
+            description: `Redeemed ${orderData.loyaltyPointsUsed} coins for order payment`
+          });
+          
+          await loyalty.save();
+        }
+      } catch (redeemError) {
+        // Don't fail the order creation if loyalty redemption fails
+      }
+    }
     
     // No totalSold update on order creation
     // totalSold will be updated when order status becomes 'delivered'
@@ -191,26 +245,26 @@ exports.updateOrder = async (req, res) => {
       });
     }
     
+    // Update status timestamps when status changes
+    if (updates.status && updates.status !== oldOrder.status) {
+      updates.statusTimestamps = {
+        ...oldOrder.statusTimestamps,
+        [updates.status]: new Date()
+      };
+    }
+    
     const order = await Order.findByIdAndUpdate(id, updates, { new: true });
     
     // If status changed to 'confirmed', reduce variant stock
     if (updates.status === 'confirmed' && oldOrder.status !== 'confirmed') {
-      console.log('Order status changed to confirmed, updating stock...');
       if (order.items && order.items.length > 0) {
         for (const item of order.items) {
-          console.log('Processing item:', {
-            product: item.product,
-            variant: item.variant,
-            quantity: item.quantity
-          });
           
           // Update variant stock if variant exists
           if (item.variant && item.variant.sku) {
-            console.log('Updating variant stock for SKU:', item.variant.sku);
             
             // First, get the current product to check variant stock
             const currentProduct = await Product.findById(item.product);
-            console.log('Current product variants:', currentProduct.variants);
             
             // Find variant by SKU and update stock
             const result = await Product.findOneAndUpdate(
@@ -233,39 +287,27 @@ exports.updateOrder = async (req, res) => {
               product.totalStock = updatedTotalStock;
               await product.save();
               
-              console.log('Updated totalStock to:', updatedTotalStock);
               
               // Verify the update by fetching the product again
               const verifyProduct = await Product.findById(item.product);
-              console.log('Verification - Product totalStock:', verifyProduct.totalStock);
-              console.log('Verification - Variants stock:', verifyProduct.variants.map(v => ({ sku: v.sku, stock: v.stockQuantity })));
             }
             
             if (result) {
-              console.log('Variant stock update result: Success');
-              console.log('Updated product totalStock:', result.totalStock);
-              console.log('Updated variant stock:', result.variants.find(v => v.sku === item.variant.sku)?.stockQuantity);
             } else {
-              console.log('Variant stock update result: Failed - Product or variant not found');
             }
           } else {
-            console.log('Updating main product stock');
             // Update main product stock
             const result = await Product.findByIdAndUpdate(
               item.product,
               { $inc: { totalStock: -item.quantity } },
               { new: true }
             );
-            console.log('Main product stock update result:', result ? 'Success' : 'Failed');
-            if (result) {
-              console.log('Updated product totalStock:', result.totalStock);
-            }
           }
         }
       }
     }
     
-    // If status changed to 'delivered', update product totalSold
+    // If status changed to 'delivered', update product totalSold and earn coins
     if (updates.status === 'delivered' && oldOrder.status !== 'delivered') {
       if (order.items && order.items.length > 0) {
         for (const item of order.items) {
@@ -274,6 +316,32 @@ exports.updateOrder = async (req, res) => {
             { $inc: { totalSold: item.quantity } },
             { new: true }
           );
+        }
+        
+        // Earn coins for delivered order (COD) - but not if paid with loyalty points
+        if (order.paymentMethod === 'cod' && (!order.loyaltyPointsUsed || order.loyaltyPointsUsed === 0)) {
+          const coinResult = await earnCoinsFromOrder(
+            order.user,
+            order._id,
+            order.items,
+            'order_delivered_cod'
+          );
+        } else if (order.paymentMethod === 'cod' && order.loyaltyPointsUsed > 0) {
+        }
+      }
+    }
+    
+    // If payment status changed to 'paid', earn coins (for online payments) - but not if paid with loyalty points
+    if (updates.paymentStatus === 'paid' && oldOrder.paymentStatus !== 'paid') {
+      if (order.items && order.items.length > 0) {
+        if (!order.loyaltyPointsUsed || order.loyaltyPointsUsed === 0) {
+          const coinResult = await earnCoinsFromOrder(
+            order.user,
+            order._id,
+            order.items,
+            'payment_successful'
+          );
+        } else {
         }
       }
     }
@@ -297,15 +365,12 @@ exports.updateOrder = async (req, res) => {
 
 exports.updateTotalSold = async (req, res) => {
   try {
-    console.log('Starting totalSold update for all delivered orders...');
     
     // Reset all product totalSold to 0
     await Product.updateMany({}, { totalSold: 0 });
-    console.log('Reset all product totalSold to 0');
     
     // Get all delivered orders
     const deliveredOrders = await Order.find({ status: 'delivered' });
-    console.log(`Found ${deliveredOrders.length} delivered orders`);
     
     // Update totalSold for each delivered order
     for (const order of deliveredOrders) {
@@ -316,7 +381,6 @@ exports.updateTotalSold = async (req, res) => {
             { $inc: { totalSold: item.quantity } },
             { new: true }
           );
-          console.log(`Updated product ${item.product} with quantity ${item.quantity}`);
         }
       }
     }
@@ -326,7 +390,6 @@ exports.updateTotalSold = async (req, res) => {
       .select('title totalSold')
       .limit(10);
     
-    console.log('TotalSold update completed successfully!');
     
     return sendResponse({
       res,
@@ -339,7 +402,6 @@ exports.updateTotalSold = async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('Error updating totalSold:', error);
     return sendResponse({
       res,
       statusCode: 500,
@@ -366,6 +428,101 @@ exports.deleteOrder = async (req, res) => {
       statusCode: 200,
       success: true,
       message: 'Order deleted successfully',
+    });
+  } catch (error) {
+    return sendResponse({
+      res,
+      statusCode: 500,
+      success: false,
+      message: error.message || 'Server error',
+    });
+  }
+};
+
+exports.trackOrder = async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    
+    const order = await Order.findOne({ orderId })
+      .populate('user', 'name email phone')
+      .populate('items.product', 'title featuredImage slug');
+    
+    if (!order) {
+      return sendResponse({
+        res,
+        statusCode: 404,
+        success: false,
+        message: 'Order not found',
+      });
+    }
+
+    // Create tracking timeline
+    const trackingSteps = [
+      {
+        status: 'pending',
+        label: 'Order Received',
+        completed: true,
+        timestamp: order.statusTimestamps.pending || order.createdAt,
+        description: 'Your order has been received and is being processed'
+      },
+      {
+        status: 'confirmed',
+        label: 'Order Confirmed',
+        completed: order.status === 'confirmed' || order.status === 'processing' || order.status === 'shipped' || order.status === 'delivered',
+        timestamp: order.statusTimestamps.confirmed,
+        description: 'Your order has been confirmed'
+      },
+      {
+        status: 'processing',
+        label: 'Order Processing',
+        completed: order.status === 'processing' || order.status === 'shipped' || order.status === 'delivered',
+        timestamp: order.statusTimestamps.processing,
+        description: 'Your order is being prepared for shipment'
+      },
+      {
+        status: 'shipped',
+        label: 'Order Shipped',
+        completed: order.status === 'shipped' || order.status === 'delivered',
+        timestamp: order.statusTimestamps.shipped,
+        description: 'Your order has been shipped and is on its way'
+      },
+      {
+        status: 'delivered',
+        label: 'Delivered',
+        completed: order.status === 'delivered',
+        timestamp: order.statusTimestamps.delivered,
+        description: 'Your order has been delivered successfully'
+      }
+    ];
+
+    // Only add cancelled step if order is actually cancelled
+    if (order.status === 'cancelled') {
+      trackingSteps.push({
+        status: 'cancelled',
+        label: 'Order Cancelled',
+        completed: true,
+        timestamp: order.statusTimestamps.cancelled,
+        description: 'Your order has been cancelled'
+      });
+    }
+
+    return sendResponse({
+      res,
+      statusCode: 200,
+      success: true,
+      message: 'Order tracking information retrieved successfully',
+      data: {
+        order: {
+          orderId: order.orderId,
+          status: order.status,
+          total: order.total,
+          createdAt: order.createdAt,
+          shippingAddress: order.shippingAddress,
+          paymentMethod: order.paymentMethod,
+          paymentStatus: order.paymentStatus
+        },
+        trackingSteps
+      }
     });
   } catch (error) {
     return sendResponse({
