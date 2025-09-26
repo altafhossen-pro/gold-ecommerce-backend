@@ -1,4 +1,5 @@
 const { Product } = require('./product.model');
+const { StockTracking } = require('../inventory/stockTracking.model');
 const sendResponse = require('../../utils/sendResponse');
 
 // Helper for pagination and filtering
@@ -460,8 +461,10 @@ exports.updateProduct = async (req, res) => {
   try {
     const { id } = req.params;
     const updates = req.body;
-    const product = await Product.findByIdAndUpdate(id, updates, { new: true });
-    if (!product) {
+    
+    // Get the original product to compare stock changes
+    const originalProduct = await Product.findById(id);
+    if (!originalProduct) {
       return sendResponse({
         res,
         statusCode: 404,
@@ -469,12 +472,89 @@ exports.updateProduct = async (req, res) => {
         message: 'Product not found',
       });
     }
+
+    // Update the product
+    const product = await Product.findByIdAndUpdate(id, updates, { new: true });
+    
+    // Check for stock changes and create tracking records
+    const stockTrackingRecords = [];
+    
+    // Check main product stock changes
+    if (updates.totalStock !== undefined && updates.totalStock !== originalProduct.totalStock) {
+      const previousStock = originalProduct.totalStock || 0;
+      const newStock = updates.totalStock;
+      const quantity = Math.abs(newStock - previousStock);
+      const type = newStock > previousStock ? 'add' : 'remove';
+      
+      const stockTracking = new StockTracking({
+        product: id,
+        variant: null,
+        type: type,
+        quantity: quantity,
+        previousStock: previousStock,
+        newStock: newStock,
+        reason: 'Product Information Updated',
+        reference: 'Product Edit',
+        performedBy: req.user?._id || null,
+        cost: null,
+        notes: `Main product stock changed from ${previousStock} to ${newStock} units`
+      });
+      
+      stockTrackingRecords.push(stockTracking);
+    }
+    
+    // Check variant stock changes
+    if (updates.variants && Array.isArray(updates.variants)) {
+      for (const updatedVariant of updates.variants) {
+        if (updatedVariant.sku) {
+          const originalVariant = originalProduct.variants.find(v => v.sku === updatedVariant.sku);
+          
+          if (originalVariant && updatedVariant.stockQuantity !== undefined) {
+            const previousStock = originalVariant.stockQuantity || 0;
+            const newStock = updatedVariant.stockQuantity;
+            
+            if (previousStock !== newStock) {
+              const quantity = Math.abs(newStock - previousStock);
+              const type = newStock > previousStock ? 'add' : 'remove';
+              
+              const stockTracking = new StockTracking({
+                product: id,
+                variant: {
+                  sku: updatedVariant.sku,
+                  attributes: updatedVariant.attributes || originalVariant.attributes
+                },
+                type: type,
+                quantity: quantity,
+                previousStock: previousStock,
+                newStock: newStock,
+                reason: 'Product Variant Updated',
+                reference: 'Product Edit',
+                performedBy: req.user?.id || null,
+                cost: null,
+                notes: `Variant stock changed from ${previousStock} to ${newStock} units`
+              });
+              
+              stockTrackingRecords.push(stockTracking);
+            }
+          }
+        }
+      }
+    }
+    
+    // Save all stock tracking records
+    if (stockTrackingRecords.length > 0) {
+      await StockTracking.insertMany(stockTrackingRecords);
+    }
+    
     return sendResponse({
       res,
       statusCode: 200,
       success: true,
       message: 'Product updated successfully',
-      data: product,
+      data: {
+        product,
+        stockTrackingRecords: stockTrackingRecords.length
+      },
     });
   } catch (error) {
     return sendResponse({

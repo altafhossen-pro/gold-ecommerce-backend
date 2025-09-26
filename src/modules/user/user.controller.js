@@ -522,3 +522,43 @@ exports.softDeleteUser = async (req, res) => {
     });
   }
 };
+
+exports.searchUsers = async (req, res) => {
+  try {
+    const { query } = req.query;
+
+    if (!query || query.trim().length < 1) {
+      return sendResponse({
+        res,
+        statusCode: 400,
+        success: false,
+        message: 'Search query is required',
+      });
+    }
+
+    const users = await User.find({
+      $or: [
+        { name: { $regex: query, $options: 'i' } },
+        { email: { $regex: query, $options: 'i' } },
+        { phone: { $regex: query, $options: 'i' } }
+      ]
+    })
+    .select('name email phone')
+    .limit(5);
+
+    return sendResponse({
+      res,
+      statusCode: 200,
+      success: true,
+      message: 'Users found successfully',
+      data: users,
+    });
+  } catch (error) {
+    return sendResponse({
+      res,
+      statusCode: 500,
+      success: false,
+      message: error.message || 'Server error',
+    });
+  }
+};

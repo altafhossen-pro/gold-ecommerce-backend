@@ -13,6 +13,12 @@ exports.createOrder = async (req, res) => {
     // Set user from authenticated token
     orderData.user = req.user._id;
     
+    // Set default status to 'pending' for all orders
+    orderData.status = 'pending';
+    orderData.statusTimestamps = {
+      pending: new Date()
+    };
+    
     // If order is paid with loyalty points, set payment status to 'paid' and status to 'confirmed'
     if (orderData.loyaltyPointsUsed && orderData.loyaltyPointsUsed > 0) {
       orderData.paymentStatus = 'paid';
@@ -62,6 +68,39 @@ exports.createOrder = async (req, res) => {
         }
       } catch (redeemError) {
         // Don't fail the order creation if loyalty redemption fails
+      }
+    }
+    
+    // Update product stock only for confirmed orders (loyalty points orders)
+    if (order.status === 'confirmed' && order.items && order.items.length > 0) {
+      for (const item of order.items) {
+        // Update variant stock if variant exists
+        if (item.variant && item.variant.sku) {
+          // Update variant stock
+          const result = await Product.findOneAndUpdate(
+            { 
+              _id: item.product,
+              'variants.sku': item.variant.sku 
+            },
+            { 
+              $inc: { 'variants.$.stockQuantity': -item.quantity }
+            },
+            { new: true }
+          );
+          
+          if (result) {
+            // Update totalStock
+            const updatedTotalStock = result.variants.reduce((total, variant) => total + (variant.stockQuantity || 0), 0);
+            await Product.findByIdAndUpdate(item.product, { totalStock: updatedTotalStock });
+          }
+        } else {
+          // Update main product stock
+          await Product.findByIdAndUpdate(
+            item.product,
+            { $inc: { totalStock: -item.quantity } },
+            { new: true }
+          );
+        }
       }
     }
     
@@ -244,6 +283,31 @@ exports.updateOrder = async (req, res) => {
         message: 'Order not found',
       });
     }
+
+    // Validate status transition
+    if (updates.status && updates.status !== oldOrder.status) {
+      const validTransitions = {
+        'pending': ['confirmed', 'cancelled'],
+        'confirmed': ['processing', 'cancelled'],
+        'processing': ['shipped', 'cancelled'],
+        'shipped': ['delivered', 'returned'],
+        'delivered': ['returned'],
+        'cancelled': [], // No transitions from cancelled
+        'returned': [] // No transitions from returned
+      };
+
+      const currentStatus = oldOrder.status;
+      const newStatus = updates.status;
+      
+      if (!validTransitions[currentStatus] || !validTransitions[currentStatus].includes(newStatus)) {
+        return sendResponse({
+          res,
+          statusCode: 400,
+          success: false,
+          message: `Invalid status transition from ${currentStatus} to ${newStatus}`,
+        });
+      }
+    }
     
     // Update status timestamps when status changes
     if (updates.status && updates.status !== oldOrder.status) {
@@ -300,6 +364,47 @@ exports.updateOrder = async (req, res) => {
             const result = await Product.findByIdAndUpdate(
               item.product,
               { $inc: { totalStock: -item.quantity } },
+              { new: true }
+            );
+          }
+        }
+      }
+    }
+    
+    // If status changed to 'returned', add stock back
+    if (updates.status === 'returned' && oldOrder.status !== 'returned') {
+      if (order.items && order.items.length > 0) {
+        for (const item of order.items) {
+          
+          // Update variant stock if variant exists
+          if (item.variant && item.variant.sku) {
+            
+            // Find variant by SKU and add stock back
+            const result = await Product.findOneAndUpdate(
+              { 
+                _id: item.product,
+                'variants.sku': item.variant.sku 
+              },
+              { 
+                $inc: { 'variants.$.stockQuantity': +item.quantity }
+              },
+              { new: true }
+            );
+            
+            // Manually update totalStock after variant update
+            if (result) {
+              const updatedTotalStock = result.variants.reduce((total, variant) => total + (variant.stockQuantity || 0), 0);
+              
+              // Update totalStock and save to trigger any middleware
+              const product = await Product.findById(item.product);
+              product.totalStock = updatedTotalStock;
+              await product.save();
+            }
+          } else {
+            // Update main product stock
+            await Product.findByIdAndUpdate(
+              item.product,
+              { $inc: { totalStock: +item.quantity } },
               { new: true }
             );
           }
@@ -428,6 +533,181 @@ exports.deleteOrder = async (req, res) => {
       statusCode: 200,
       success: true,
       message: 'Order deleted successfully',
+    });
+  } catch (error) {
+    return sendResponse({
+      res,
+      statusCode: 500,
+      success: false,
+      message: error.message || 'Server error',
+    });
+  }
+};
+
+exports.createManualOrder = async (req, res) => {
+  try {
+    const { orderType, items, subtotal, discount, totalAmount, status, notes, userId, guestInfo, deliveryAddress } = req.body;
+    
+    // Validate required fields
+    if (!items || items.length === 0) {
+      return sendResponse({
+        res,
+        statusCode: 400,
+        success: false,
+        message: 'At least one item is required',
+      });
+    }
+
+    if (!totalAmount || totalAmount <= 0) {
+      return sendResponse({
+        res,
+        statusCode: 400,
+        success: false,
+        message: 'Total amount must be greater than 0',
+      });
+    }
+
+    // Prepare order data
+    const orderData = {
+      orderType: 'manual',
+      items: [],
+      total: totalAmount,
+      discount: discount || 0,
+      shippingAddress: {
+        label: 'Manual Order',
+        street: deliveryAddress || '',
+        city: '',
+        state: '',
+        postalCode: '',
+        country: 'Bangladesh'
+      },
+      status: status || 'confirmed',
+      orderNotes: notes || '',
+      createdBy: req.user._id, // Admin who created the order
+      statusTimestamps: {
+        pending: new Date(),
+        confirmed: new Date()
+      }
+    };
+
+    // Process items and validate products
+    for (const item of items) {
+      const product = await Product.findById(item.productId);
+      if (!product) {
+        return sendResponse({
+          res,
+          statusCode: 400,
+          success: false,
+          message: `Product with ID ${item.productId} not found`,
+        });
+      }
+
+      // Find variant if variantId is provided
+      let selectedVariant = null;
+      if (item.variantId && product.variants && product.variants.length > 0) {
+        selectedVariant = product.variants.find(v => v._id.toString() === item.variantId);
+        if (!selectedVariant) {
+          return sendResponse({
+            res,
+            statusCode: 400,
+            success: false,
+            message: `Variant with ID ${item.variantId} not found for product ${product.title}`,
+          });
+        }
+      }
+
+      // Prepare order item
+      const orderItem = {
+        product: item.productId,
+        name: product.title,
+        image: product.featuredImage,
+        price: item.price || (selectedVariant ? selectedVariant.currentPrice : product.priceRange?.min || 0),
+        quantity: item.quantity,
+        subtotal: (item.price || (selectedVariant ? selectedVariant.currentPrice : product.priceRange?.min || 0)) * item.quantity,
+        variant: {
+          size: item.size || (selectedVariant ? selectedVariant.attributes.find(attr => attr.name === 'Size')?.value : ''),
+          color: item.color || (selectedVariant ? selectedVariant.attributes.find(attr => attr.name === 'Color')?.value : ''),
+          colorHexCode: item.colorHexCode || (selectedVariant ? selectedVariant.attributes.find(attr => attr.name === 'Color')?.hexCode : ''),
+          sku: item.sku || (selectedVariant ? selectedVariant.sku : ''),
+          stockQuantity: item.stockQuantity || (selectedVariant ? selectedVariant.stockQuantity : 0),
+          stockStatus: item.stockStatus || (selectedVariant ? selectedVariant.stockStatus : 'in_stock')
+        }
+      };
+
+      orderData.items.push(orderItem);
+    }
+
+    // Set user based on order type
+    if (orderType === 'existing' && userId) {
+      orderData.user = userId;
+    } else if (orderType === 'guest' && guestInfo) {
+      // For guest orders, we'll store guest info in shipping address
+      orderData.shippingAddress = {
+        label: 'Guest Order',
+        street: guestInfo.address || '',
+        city: '',
+        state: '',
+        postalCode: '',
+        country: 'Bangladesh'
+      };
+      // Store guest info in admin notes
+      orderData.adminNotes = `Guest Order - Name: ${guestInfo.name}, Phone: ${guestInfo.phone}, Email: ${guestInfo.email || 'N/A'}`;
+    } else {
+      return sendResponse({
+        res,
+        statusCode: 400,
+        success: false,
+        message: 'Invalid order type or missing user information',
+      });
+    }
+
+    // Create the order
+    const order = new Order(orderData);
+    await order.save();
+
+    // Update product stock if order is confirmed
+    if (order.status === 'confirmed') {
+      for (const item of order.items) {
+        if (item.variant && item.variant.sku) {
+          // Update variant stock
+          const result = await Product.findOneAndUpdate(
+            { 
+              _id: item.product,
+              'variants.sku': item.variant.sku 
+            },
+            { 
+              $inc: { 'variants.$.stockQuantity': -item.quantity }
+            },
+            { new: true }
+          );
+          
+          if (result) {
+            // Update totalStock
+            const updatedTotalStock = result.variants.reduce((total, variant) => total + (variant.stockQuantity || 0), 0);
+            await Product.findByIdAndUpdate(item.product, { totalStock: updatedTotalStock });
+          }
+        } else {
+          // Update main product stock
+          await Product.findByIdAndUpdate(
+            item.product,
+            { $inc: { totalStock: -item.quantity } },
+            { new: true }
+          );
+        }
+      }
+    }
+
+    // Populate the created order for response
+    const populatedOrder = await Order.findById(order._id)
+      .populate('user', 'name email phone')
+      .populate('items.product', 'title featuredImage slug');
+
+    return sendResponse({
+      res,
+      statusCode: 201,
+      success: true,
+      message: 'Manual order created successfully',
+      data: populatedOrder,
     });
   } catch (error) {
     return sendResponse({

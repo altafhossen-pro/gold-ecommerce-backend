@@ -75,6 +75,12 @@ const orderSchema = new mongoose.Schema({
     isGift: { type: Boolean, default: false },
     giftMessage: { type: String },
     adminNotes: { type: String },
+    orderType: {
+        type: String,
+        enum: ['auto', 'manual'],
+        default: 'auto'
+    },
+    createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }, // For manual orders
 }, {
     timestamps: true,
 });

@@ -9,19 +9,11 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET ,
 });
 
-// Debug: Check if config is loaded properly
-console.log('Cloudinary Config Check:');
-console.log('Cloud Name:', cloudinary.config().cloud_name);
-console.log('API Key:', cloudinary.config().api_key ? 'Loaded' : 'Missing');
-console.log('API Secret:', cloudinary.config().api_secret ? 'Loaded' : 'Missing');
 
 // Test cloudinary connection
 const testCloudinaryConnection = async () => {
   try {
     const result = await cloudinary.api.ping();
-    console.log('✅ Cloudinary connection successful:', result);
-  } catch (error) {
-    console.log('❌ Cloudinary connection failed:', error.message);
   }
 };
 

@@ -7,6 +7,7 @@ router.post('/login', userController.adminLogin);
 
 // Protected admin routes (require admin token)
 router.get('/', userController.listUsers);
+router.get('/search', userController.searchUsers);
 router.get('/:id', userController.getUserById);
 router.put('/:id', userController.updateUser);
 router.delete('/:id', userController.deleteUser);

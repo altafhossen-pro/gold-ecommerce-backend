@@ -28,7 +28,6 @@ class OTPService {
     try {
       // For testing purposes, we'll just log the OTP
       // In production, integrate with SMS service like Twilio, AWS SNS, etc.
-      console.log(`Sending OTP ${otp} to phone number: ${phone}`);
       
       // Simulate API call delay
       await new Promise(resolve => setTimeout(resolve, 1000));

@@ -71,7 +71,6 @@ const verifyTokenAdmin = async (req, res, next) => {
                 message: 'Admin access required'
             });
         }
-
         // Add admin info to request
         req.user = user;
 

@@ -14,10 +14,6 @@ router.patch('/profile', userController.updateProfile);
 router.put('/change-password', userController.changePassword);
 router.delete('/profile', userController.deleteUser);
 
-// Admin routes
-router.get('/admin/users', userController.getUsers);
-router.get('/admin/users/:id', userController.getUserById);
-router.patch('/admin/users/:id', userController.updateUserById);
-router.delete('/admin/users/:id', userController.softDeleteUser);
+// Admin routes moved to separate admin/user module
 
 module.exports = router;

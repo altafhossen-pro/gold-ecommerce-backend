@@ -33,10 +33,6 @@ exports.getDashboardStats = async (req, res) => {
     // Set start date to beginning of day for more accurate filtering
     startDate.setHours(0, 0, 0, 0);
     
-    // Debug logging
-    console.log('Analytics Period:', period);
-    console.log('Start Date:', startDate.toISOString());
-    console.log('Days difference:', Math.ceil((now - startDate) / (1000 * 60 * 60 * 24)));
 
     // Basic counts (all time)
     const totalUsers = await User.countDocuments();
@@ -53,16 +49,6 @@ exports.getDashboardStats = async (req, res) => {
     const deliveredOrders = await Order.countDocuments({ status: 'delivered' });
     const cancelledOrders = await Order.countDocuments({ status: 'cancelled' });
     const returnedOrders = await Order.countDocuments({ status: 'returned' });
-
-    // Debug: Log order status counts
-    console.log('Order Status Counts:', {
-      pending: pendingOrders,
-      confirmed: confirmedOrders,
-      shipped: shippedOrders,
-      delivered: deliveredOrders,
-      cancelled: cancelledOrders,
-      returned: returnedOrders
-    });
 
     // Period-based order statistics
     const periodOrders = await Order.countDocuments({ 
@@ -152,25 +138,6 @@ exports.getDashboardStats = async (req, res) => {
     lowStockProducts.forEach(product => {
       product.calculatedTotalStock = product.variants.reduce((total, variant) => total + (variant.stockQuantity || 0), 0);
     });
-
-    // Debug: Log low stock products
-    console.log('Low stock products found:', lowStockProducts.length);
-    lowStockProducts.forEach(product => {
-      console.log(`Product: ${product.title}, totalStock: ${product.totalStock}, calculatedTotalStock: ${product.calculatedTotalStock}, variants:`, 
-        product.variants.map(v => ({ sku: v.sku, stock: v.stockQuantity }))
-      );
-    });
-
-    // Debug: Check specific product
-    const testProduct = await Product.findOne({ title: 'Test Product 1' });
-    if (testProduct) {
-      console.log('Test Product 1 details:', {
-        title: testProduct.title,
-        totalStock: testProduct.totalStock,
-        variants: testProduct.variants.map(v => ({ sku: v.sku, stock: v.stockQuantity })),
-        isActive: testProduct.isActive
-      });
-    }
 
     // Recent orders (period-based)
     const recentOrders = await Order.find({

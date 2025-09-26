@@ -18,6 +18,7 @@ const uploadRoutes = require('../modules/upload/upload.route');
 const menuRoutes = require('../modules/menu/menu.route');
 const heroBannerRoutes = require('../modules/heroBanner/heroBanner.route');
 const heroProductRoutes = require('../modules/heroProduct/heroProduct.route');
+const inventoryRoutes = require('../modules/inventory/inventory.route');
 
 router.use('/user', userRoutes);
 router.use('/otp', otpRoutes);
@@ -36,6 +37,7 @@ router.use('/upload', uploadRoutes);
 router.use('/menu', menuRoutes);
 router.use('/hero-banner', heroBannerRoutes);
 router.use('/hero-product', heroProductRoutes);
+router.use('/inventory', inventoryRoutes);
 
 // Health check route
 router.get('/health', (req, res) => {
