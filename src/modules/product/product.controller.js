@@ -17,6 +17,18 @@ const getPaginatedProducts = async (filter, req, res, message) => {
     if (req.query.minPrice) queryFilter['priceRange.min'] = { $gte: Number(req.query.minPrice) };
     if (req.query.maxPrice) queryFilter['priceRange.max'] = { $lte: Number(req.query.maxPrice) };
     if (req.query.isActive) queryFilter.isActive = req.query.isActive === 'true';
+    
+    // Add search functionality
+    if (req.query.search) {
+      const searchQuery = req.query.search;
+      queryFilter.$or = [
+        { title: { $regex: searchQuery, $options: 'i' } },
+        { shortDescription: { $regex: searchQuery, $options: 'i' } },
+        { description: { $regex: searchQuery, $options: 'i' } },
+        { tags: { $in: [new RegExp(searchQuery, 'i')] } },
+        { brand: { $regex: searchQuery, $options: 'i' } }
+      ];
+    }
 
     const total = await Product.countDocuments(queryFilter);
     const products = await Product.find(queryFilter)
