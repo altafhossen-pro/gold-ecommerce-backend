@@ -64,6 +64,44 @@ exports.createProduct = async (req, res) => {
   try {
     const product = new Product(req.body);
     await product.save();
+
+    // Create stock tracking records
+    if (product.variants && product.variants.length > 0) {
+      // If product has variants, track each variant separately
+      for (const variant of product.variants) {
+        if (variant.stockQuantity && variant.stockQuantity > 0) {
+          const variantStockTracking = new StockTracking({
+            product: product._id,
+            variant: {
+              sku: variant.sku,
+              attributes: variant.attributes
+            },
+            type: 'add',
+            quantity: variant.stockQuantity,
+            previousStock: 0,
+            newStock: variant.stockQuantity,
+            reason: 'Initial variant stock on product creation',
+            performedBy: req.user?.id || req.user?._id,
+            notes: `Stock added for variant ${variant.sku} during product creation`
+          });
+          await variantStockTracking.save();
+        }
+      }
+    } else if (product.totalStock && product.totalStock > 0) {
+      // If product has no variants, track main product stock
+      const stockTracking = new StockTracking({
+        product: product._id,
+        type: 'add',
+        quantity: product.totalStock,
+        previousStock: 0,
+        newStock: product.totalStock,
+        reason: 'Initial stock on product creation',
+        performedBy: req.user?.id || req.user?._id,
+        notes: 'Stock added during product creation'
+      });
+      await stockTracking.save();
+    }
+
     return sendResponse({
       res,
       statusCode: 201,
@@ -72,11 +110,54 @@ exports.createProduct = async (req, res) => {
       data: product,
     });
   } catch (error) {
+    let statusCode = 500;
+    let message = 'Server error';
+
+    // Handle specific MongoDB errors
+    if (error.code === 11000) {
+      statusCode = 400;
+      
+      // Check if it's a duplicate SKU error
+      if (error.keyPattern && error.keyPattern['variants.sku']) {
+        const duplicateSku = error.keyValue['variants.sku'];
+        message = `Product variant with SKU "${duplicateSku}" already exists. Please use a different SKU.`;
+      }
+      // Check if it's a duplicate slug error
+      else if (error.keyPattern && error.keyPattern.slug) {
+        const duplicateSlug = error.keyValue.slug;
+        message = `Product with slug "${duplicateSlug}" already exists. Please use a different slug.`;
+      }
+      // Check if it's a duplicate title error
+      else if (error.keyPattern && error.keyPattern.title) {
+        const duplicateTitle = error.keyValue.title;
+        message = `Product with title "${duplicateTitle}" already exists. Please use a different title.`;
+      }
+      // Generic duplicate key error
+      else {
+        message = 'A product with this information already exists. Please check for duplicates.';
+      }
+    }
+    // Handle validation errors
+    else if (error.name === 'ValidationError') {
+      statusCode = 400;
+      const validationErrors = Object.values(error.errors).map(err => err.message);
+      message = `Validation failed: ${validationErrors.join(', ')}`;
+    }
+    // Handle other specific errors
+    else if (error.name === 'CastError') {
+      statusCode = 400;
+      message = 'Invalid data format provided.';
+    }
+    // Default error handling
+    else {
+      message = error.message || 'Failed to create product. Please try again.';
+    }
+
     return sendResponse({
       res,
-      statusCode: 500,
+      statusCode,
       success: false,
-      message: error.message || 'Server error',
+      message,
     });
   }
 };
