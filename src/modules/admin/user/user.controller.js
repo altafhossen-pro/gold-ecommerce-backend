@@ -9,6 +9,8 @@ exports.listUsers = async (req, res) => {
     const skip = (page - 1) * limit;
     const sort = req.query.sort || '-createdAt';
     const search = req.query.search || '';
+    const status = req.query.status || '';
+    const role = req.query.role || '';
 
     // Build query filter
     let queryFilter = {};
@@ -20,6 +22,16 @@ exports.listUsers = async (req, res) => {
         { email: { $regex: search, $options: 'i' } },
         { phone: { $regex: search, $options: 'i' } }
       ];
+    }
+
+    // Status filter
+    if (status) {
+      queryFilter.status = status;
+    }
+    
+    // Role filter
+    if (role) {
+      queryFilter.role = role;
     }
 
     const total = await User.countDocuments(queryFilter);
