@@ -1,7 +1,7 @@
 const mongoose = require('mongoose');
 
 const loyaltyHistorySchema = new mongoose.Schema({
-  type: { type: String, enum: ['earn', 'redeem', 'adjust'], required: true },
+  type: { type: String, enum: ['earn', 'redeem', 'adjust', 'topup'], required: true },
   points: { type: Number, required: true },
   coins: { type: Number, default: 0 }, // Coins earned/redeemed
   order: { type: mongoose.Schema.Types.ObjectId, ref: 'Order' },
