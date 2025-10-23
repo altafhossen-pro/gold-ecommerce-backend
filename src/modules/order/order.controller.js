@@ -13,6 +13,120 @@ exports.createOrder = async (req, res) => {
     // Set user from authenticated token
     orderData.user = req.user._id;
     
+    // Validate address IDs if provided
+    if (orderData.shippingAddress) {
+      const { Division, District, Upazila, DhakaCity } = require('../address/address.model');
+      
+      // Validate division ID if provided
+      if (orderData.shippingAddress.divisionId) {
+        const division = await Division.findOne({ id: orderData.shippingAddress.divisionId });
+        if (!division) {
+          return sendResponse({
+            res,
+            statusCode: 400,
+            success: false,
+            message: 'Invalid division ID provided'
+          });
+        }
+      }
+      
+      // Validate district ID if provided
+      if (orderData.shippingAddress.districtId) {
+        const district = await District.findOne({ id: orderData.shippingAddress.districtId });
+        if (!district) {
+          return sendResponse({
+            res,
+            statusCode: 400,
+            success: false,
+            message: 'Invalid district ID provided'
+          });
+        }
+      }
+      
+      // Validate upazila ID if provided
+      if (orderData.shippingAddress.upazilaId) {
+        const upazila = await Upazila.findOne({ id: orderData.shippingAddress.upazilaId });
+        if (!upazila) {
+          return sendResponse({
+            res,
+            statusCode: 400,
+            success: false,
+            message: 'Invalid upazila ID provided'
+          });
+        }
+      }
+      
+      // Validate area ID if provided (for Dhaka city)
+      if (orderData.shippingAddress.areaId) {
+        const area = await DhakaCity.findById(orderData.shippingAddress.areaId);
+        if (!area) {
+          return sendResponse({
+            res,
+            statusCode: 400,
+            success: false,
+            message: 'Invalid area ID provided'
+          });
+        }
+      }
+    }
+    
+    // Validate billing address IDs if provided
+    if (orderData.billingAddress) {
+      const { Division, District, Upazila, DhakaCity } = require('../address/address.model');
+      
+      // Validate division ID if provided
+      if (orderData.billingAddress.divisionId) {
+        const division = await Division.findOne({ id: orderData.billingAddress.divisionId });
+        if (!division) {
+          return sendResponse({
+            res,
+            statusCode: 400,
+            success: false,
+            message: 'Invalid billing division ID provided'
+          });
+        }
+      }
+      
+      // Validate district ID if provided
+      if (orderData.billingAddress.districtId) {
+        const district = await District.findOne({ id: orderData.billingAddress.districtId });
+        if (!district) {
+          return sendResponse({
+            res,
+            statusCode: 400,
+            success: false,
+            message: 'Invalid billing district ID provided'
+          });
+        }
+      }
+      
+      // Validate upazila ID if provided
+      if (orderData.billingAddress.upazilaId) {
+        const upazila = await Upazila.findOne({ id: orderData.billingAddress.upazilaId });
+        if (!upazila) {
+          return sendResponse({
+            res,
+            statusCode: 400,
+            success: false,
+            message: 'Invalid billing upazila ID provided'
+          });
+        }
+      }
+      
+      // Validate area ID if provided (for Dhaka city)
+      if (orderData.billingAddress.areaId) {
+        const area = await DhakaCity.findById(orderData.billingAddress.areaId);
+        if (!area) {
+          return sendResponse({
+            res,
+            statusCode: 400,
+            success: false,
+            message: 'Invalid billing area ID provided'
+          });
+        }
+      }
+    }
+    
     // Set default status to 'pending' for all orders
     orderData.status = 'pending';
     orderData.statusTimestamps = {

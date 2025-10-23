@@ -21,6 +21,7 @@ const heroBannerRoutes = require('../modules/heroBanner/heroBanner.route');
 const heroProductRoutes = require('../modules/heroProduct/heroProduct.route');
 const inventoryRoutes = require('../modules/inventory/inventory.route');
 const upsellRoutes = require('../modules/upsell/upsell.routes');
+const addressRoutes = require('../modules/address/address.route');
 
 router.use('/user', userRoutes);
 router.use('/otp', otpRoutes);
@@ -42,6 +43,7 @@ router.use('/hero-banner', heroBannerRoutes);
 router.use('/hero-product', heroProductRoutes);
 router.use('/inventory', inventoryRoutes);
 router.use('/upsell', upsellRoutes);
+router.use('/address', addressRoutes);
 
 // Health check route
 router.get('/health', (req, res) => {

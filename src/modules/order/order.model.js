@@ -8,6 +8,16 @@ const addressSchema = new mongoose.Schema({
     postalCode: { type: String },
     country: { type: String },
     isDefault: { type: Boolean, default: false },
+    // Address IDs for structured address handling
+    divisionId: { type: String },
+    districtId: { type: String },
+    upazilaId: { type: String },
+    areaId: { type: String },
+    // Address names for display
+    division: { type: String },
+    district: { type: String },
+    upazila: { type: String },
+    area: { type: String }
 }, { _id: false });
 
 const orderItemSchema = new mongoose.Schema({

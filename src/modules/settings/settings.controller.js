@@ -89,3 +89,133 @@ exports.resetSettings = async (req, res) => {
     });
   }
 };
+
+// Get loyalty settings only
+exports.getLoyaltySettings = async (req, res) => {
+  try {
+    let settings = await Settings.findOne();
+    
+    // If no settings exist, create default settings
+    if (!settings) {
+      settings = new Settings();
+      await settings.save();
+    }
+    
+    return sendResponse({
+      res,
+      statusCode: 200,
+      success: true,
+      message: 'Loyalty settings retrieved successfully',
+      data: settings.loyaltySettings
+    });
+  } catch (error) {
+    return sendResponse({
+      res,
+      statusCode: 500,
+      success: false,
+      message: error.message || 'Server error'
+    });
+  }
+};
+
+// Update loyalty settings only
+exports.updateLoyaltySettings = async (req, res) => {
+  try {
+    const loyaltyData = req.body;
+    const updateData = {
+      'loyaltySettings': loyaltyData,
+      updatedBy: req.user._id
+    };
+    
+    let settings = await Settings.findOne();
+    
+    if (!settings) {
+      // Create new settings if none exist
+      settings = new Settings();
+    }
+    
+    // Update only loyalty settings
+    Object.assign(settings.loyaltySettings, loyaltyData);
+    settings.updatedBy = req.user._id;
+    
+    await settings.save();
+    
+    return sendResponse({
+      res,
+      statusCode: 200,
+      success: true,
+      message: 'Loyalty settings updated successfully',
+      data: settings.loyaltySettings
+    });
+  } catch (error) {
+    return sendResponse({
+      res,
+      statusCode: 500,
+      success: false,
+      message: error.message || 'Server error'
+    });
+  }
+};
+
+// Get delivery charge settings
+exports.getDeliveryChargeSettings = async (req, res) => {
+  try {
+    let settings = await Settings.findOne();
+    
+    // If no settings exist, create default settings
+    if (!settings) {
+      settings = new Settings();
+      await settings.save();
+    }
+    
+    return sendResponse({
+      res,
+      statusCode: 200,
+      success: true,
+      message: 'Delivery charge settings retrieved successfully',
+      data: settings.deliveryChargeSettings
+    });
+  } catch (error) {
+    return sendResponse({
+      res,
+      statusCode: 500,
+      success: false,
+      message: error.message || 'Server error'
+    });
+  }
+};
+
+// Update delivery charge settings
+exports.updateDeliveryChargeSettings = async (req, res) => {
+  try {
+    const deliveryChargeData = req.body;
+    
+    let settings = await Settings.findOne();
+    
+    if (!settings) {
+      // Create new settings if none exist
+      settings = new Settings();
+    }
+    
+    // Update only delivery charge settings
+    Object.assign(settings.deliveryChargeSettings, deliveryChargeData);
+    settings.updatedBy = req.user._id;
+    
+    await settings.save();
+    
+    return sendResponse({
+      res,
+      statusCode: 200,
+      success: true,
+      message: 'Delivery charge settings updated successfully',
+      data: settings.deliveryChargeSettings
+    });
+  } catch (error) {
+    return sendResponse({
+      res,
+      statusCode: 500,
+      success: false,
+      message: error.message || 'Server error'
+    });
+  }
+};

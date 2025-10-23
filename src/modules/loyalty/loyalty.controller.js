@@ -16,7 +16,7 @@ exports.getLoyalty = async (req, res) => {
       await settings.save();
     }
     
-    const coinValue = settings?.coinValue || 1;
+    const coinValue = settings?.loyaltySettings?.coinValue || 1;
     
     if (!loyalty) {
       return sendResponse({ 
@@ -143,7 +143,7 @@ exports.earnCoinsFromOrder = async (userId, orderId, orderItems, reason = 'order
   try {
     // Get settings
     const settings = await Settings.findOne();
-    if (!settings || !settings.isLoyaltyEnabled) {
+    if (!settings || !settings.loyaltySettings?.isLoyaltyEnabled) {
       return { success: false, message: 'Loyalty system disabled' };
     }
 
@@ -151,7 +151,7 @@ exports.earnCoinsFromOrder = async (userId, orderId, orderItems, reason = 'order
     const totalItems = orderItems.reduce((sum, item) => sum + item.quantity, 0);
     
     // Calculate coins to earn (1 coin per item)
-    const coinsToEarn = totalItems * settings.coinPerItem;
+    const coinsToEarn = totalItems * settings.loyaltySettings.coinPerItem;
     
     if (coinsToEarn <= 0) {
       return { success: false, message: 'No coins to earn' };
@@ -193,7 +193,7 @@ exports.redeemCoinsForCheckout = async (req, res) => {
 
     // Get settings
     const settings = await Settings.findOne();
-    if (!settings || !settings.isLoyaltyEnabled) {
+    if (!settings || !settings.loyaltySettings?.isLoyaltyEnabled) {
       return sendResponse({
         res,
         statusCode: 400,
@@ -222,7 +222,7 @@ exports.redeemCoinsForCheckout = async (req, res) => {
     }
 
     // Calculate coin value
-    const coinValue = coinsToRedeem * settings.coinValue;
+    const coinValue = coinsToRedeem * settings.loyaltySettings.coinValue;
 
     // No maximum redeem percentage limit - user can pay entire order with coins
 
@@ -248,7 +248,7 @@ exports.redeemCoinsForCheckout = async (req, res) => {
     }
 
     // Calculate discount amount
-    const discountAmount = Math.round(coinsToRedeem * settings.coinValue);
+    const discountAmount = Math.round(coinsToRedeem * settings.loyaltySettings.coinValue);
     const finalOrderTotal = orderTotal - discountAmount;
 
     return sendResponse({
@@ -258,7 +258,7 @@ exports.redeemCoinsForCheckout = async (req, res) => {
       message: 'Coins redemption calculated successfully',
       data: {
         coinsToRedeem,
-        coinValue: settings.coinValue,
+        coinValue: settings.loyaltySettings.coinValue,
         discountAmount,
         originalTotal: orderTotal,
         finalTotal: finalOrderTotal,

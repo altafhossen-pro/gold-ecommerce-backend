@@ -1,38 +1,64 @@
 const mongoose = require('mongoose');
 
 const settingsSchema = new mongoose.Schema({
-  // Loyalty Points Settings
-  coinPerItem: { 
-    type: Number, 
-    default: 1,
-    min: 0,
-    max: 100
+  // Loyalty Points Settings - All loyalty related settings in one object
+  loyaltySettings: {
+    coinPerItem: { 
+      type: Number, 
+      default: 1,
+      min: 0,
+      max: 100
+    },
+    coinValue: { 
+      type: Number, 
+      default: 1, // 1 coin = 1 ৳
+      min: 0.1,
+      max: 100
+    },
+    isLoyaltyEnabled: { 
+      type: Boolean, 
+      default: true 
+    },
+    
+    // Coin Earning Rules
+    earnOnDelivery: { 
+      type: Boolean, 
+      default: true // Earn coins when order is delivered (COD)
+    },
+    earnOnPaymentSuccess: { 
+      type: Boolean, 
+      default: true // Earn coins when payment is successful
+    },
+    
+    // Minimum Settings (no maximum limit - user can pay entire order)
+    minRedeemAmount: { 
+      type: Number, 
+      default: 1 // Minimum ৳1 to redeem
+    }
   },
-  coinValue: { 
-    type: Number, 
-    default: 1, // 1 coin = 1 ৳
-    min: 0.1,
-    max: 100
-  },
-  isLoyaltyEnabled: { 
-    type: Boolean, 
-    default: true 
-  },
-  
-  // Coin Earning Rules
-  earnOnDelivery: { 
-    type: Boolean, 
-    default: true // Earn coins when order is delivered (COD)
-  },
-  earnOnPaymentSuccess: { 
-    type: Boolean, 
-    default: true // Earn coins when payment is successful
-  },
-  
-  // Minimum Settings (no maximum limit - user can pay entire order)
-  minRedeemAmount: { 
-    type: Number, 
-    default: 1 // Minimum ৳1 to redeem
+
+  // Delivery Charge Settings
+  deliveryChargeSettings: {
+    outsideDhaka: {
+      type: Number,
+      default: 150,
+      min: 0
+    },
+    insideDhaka: {
+      type: Number,
+      default: 80,
+      min: 0
+    },
+    subDhaka: {
+      type: Number,
+      default: 120,
+      min: 0
+    },
+    shippingFreeRequiredAmount: {
+      type: Number,
+      default: 1500,
+      min: 0
+    }
   },
   
   // General Settings
