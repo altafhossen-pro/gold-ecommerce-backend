@@ -4,6 +4,7 @@ const orderController = require('./order.controller');
 const verifyToken = require('../../middlewares/verifyToken');
 
 router.post('/', verifyToken, orderController.createOrder);
+router.post('/guest', orderController.createGuestOrder);
 router.post('/manual', verifyToken, orderController.createManualOrder);
 router.get('/', verifyToken, orderController.getOrders);
 router.get('/user', verifyToken, orderController.getUserOrders);

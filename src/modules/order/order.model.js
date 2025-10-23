@@ -90,6 +90,7 @@ const orderSchema = new mongoose.Schema({
         enum: ['auto', 'manual'],
         default: 'auto'
     },
+    isGuestOrder: { type: Boolean, default: false }, // To distinguish guest orders
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }, // For manual orders
 }, {
     timestamps: true,
@@ -98,6 +99,7 @@ const orderSchema = new mongoose.Schema({
 orderSchema.index({ user: 1 });
 orderSchema.index({ status: 1 });
 orderSchema.index({ createdAt: -1 });
+orderSchema.index({ isGuestOrder: 1 });
 
 // Function to generate 6-digit order ID
 const generateOrderId = async () => {

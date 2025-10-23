@@ -14,6 +14,10 @@ router.patch('/profile', userController.updateProfile);
 router.put('/change-password', userController.changePassword);
 router.delete('/profile', userController.deleteUser);
 
+// Profile picture routes
+router.post('/profile-picture', userController.uploadProfilePicture);
+router.delete('/profile-picture', userController.deleteProfilePicture);
+
 // Admin routes moved to separate admin/user module
 
 module.exports = router;

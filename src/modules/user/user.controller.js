@@ -2,6 +2,7 @@ const { User } = require('./user.model');
 const bcrypt = require('bcryptjs');
 const sendResponse = require('../../utils/sendResponse');
 const jwtService = require('../../services/jwtService');
+const { uploadSingle, handleUploadError, generateFileUrl, deleteFile } = require('../../utils/fileUpload');
 
 exports.signup = async (req, res) => {
   try {
@@ -559,6 +560,120 @@ exports.searchUsers = async (req, res) => {
       statusCode: 500,
       success: false,
       message: error.message || 'Server error',
+    });
+  }
+};
+
+// Upload profile picture
+exports.uploadProfilePicture = async (req, res) => {
+  try {
+    uploadSingle(req, res, async (err) => {
+      if (err) {
+        return handleUploadError(err, req, res, () => {});
+      }
+
+      if (!req.file) {
+        return sendResponse({
+          res,
+          statusCode: 400,
+          success: false,
+          message: 'No image file uploaded'
+        });
+      }
+
+      const userId = req.user._id;
+      const user = await User.findById(userId);
+
+      if (!user) {
+        return sendResponse({
+          res,
+          statusCode: 404,
+          success: false,
+          message: 'User not found'
+        });
+      }
+
+      // Delete old profile picture if exists
+      if (user.avatar) {
+        const oldFilename = user.avatar.split('/').pop();
+        deleteFile(oldFilename);
+      }
+
+      // Generate new file URL
+      const fileUrl = generateFileUrl(req.file.filename);
+
+      // Update user's avatar
+      user.avatar = fileUrl;
+      await user.save();
+
+      return sendResponse({
+        res,
+        statusCode: 200,
+        success: true,
+        message: 'Profile picture uploaded successfully',
+        data: {
+          avatar: fileUrl,
+          filename: req.file.filename,
+          originalName: req.file.originalname,
+          size: req.file.size,
+          mimetype: req.file.mimetype
+        }
+      });
+    });
+  } catch (error) {
+    return sendResponse({
+      res,
+      statusCode: 500,
+      success: false,
+      message: error.message || 'Server error'
+    });
+  }
+};
+
+// Delete profile picture
+exports.deleteProfilePicture = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const user = await User.findById(userId);
+
+    if (!user) {
+      return sendResponse({
+        res,
+        statusCode: 404,
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    if (!user.avatar) {
+      return sendResponse({
+        res,
+        statusCode: 400,
+        success: false,
+        message: 'No profile picture to delete'
+      });
+    }
+
+    // Delete file from filesystem
+    const filename = user.avatar.split('/').pop();
+    const deleted = deleteFile(filename);
+
+    // Remove avatar from user record
+    user.avatar = undefined;
+    await user.save();
+
+    return sendResponse({
+      res,
+      statusCode: 200,
+      success: true,
+      message: 'Profile picture deleted successfully'
+    });
+  } catch (error) {
+    return sendResponse({
+      res,
+      statusCode: 500,
+      success: false,
+      message: error.message || 'Server error'
     });
   }
 };

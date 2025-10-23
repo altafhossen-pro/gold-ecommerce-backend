@@ -12,6 +12,7 @@ exports.createOrder = async (req, res) => {
     
     // Set user from authenticated token
     orderData.user = req.user._id;
+    orderData.isGuestOrder = false;
     
     // Validate address IDs if provided
     if (orderData.shippingAddress) {
@@ -647,6 +648,198 @@ exports.deleteOrder = async (req, res) => {
       statusCode: 200,
       success: true,
       message: 'Order deleted successfully',
+    });
+  } catch (error) {
+    return sendResponse({
+      res,
+      statusCode: 500,
+      success: false,
+      message: error.message || 'Server error',
+    });
+  }
+};
+
+exports.createGuestOrder = async (req, res) => {
+  try {
+    // Remove orderId from request body if it exists, as it will be generated automatically
+    const orderData = { ...req.body };
+    delete orderData.orderId;
+    
+    // For guest orders, no user authentication required
+    // Set user as null or undefined for guest orders
+    orderData.user = null;
+    orderData.isGuestOrder = true;
+    
+    // Validate address IDs if provided
+    if (orderData.shippingAddress) {
+      const { Division, District, Upazila, DhakaCity } = require('../address/address.model');
+      
+      // Validate division ID if provided
+      if (orderData.shippingAddress.divisionId) {
+        const division = await Division.findOne({ id: orderData.shippingAddress.divisionId });
+        if (!division) {
+          return sendResponse({
+            res,
+            statusCode: 400,
+            success: false,
+            message: 'Invalid division ID provided'
+          });
+        }
+      }
+      
+      // Validate district ID if provided
+      if (orderData.shippingAddress.districtId) {
+        const district = await District.findOne({ id: orderData.shippingAddress.districtId });
+        if (!district) {
+          return sendResponse({
+            res,
+            statusCode: 400,
+            success: false,
+            message: 'Invalid district ID provided'
+          });
+        }
+      }
+      
+      // Validate upazila ID if provided
+      if (orderData.shippingAddress.upazilaId) {
+        const upazila = await Upazila.findOne({ id: orderData.shippingAddress.upazilaId });
+        if (!upazila) {
+          return sendResponse({
+            res,
+            statusCode: 400,
+            success: false,
+            message: 'Invalid upazila ID provided'
+          });
+        }
+      }
+      
+      // Validate Dhaka city area ID if provided
+      if (orderData.shippingAddress.areaId) {
+        const area = await DhakaCity.findOne({ _id: orderData.shippingAddress.areaId });
+        if (!area) {
+          return sendResponse({
+            res,
+            statusCode: 400,
+            success: false,
+            message: 'Invalid area ID provided'
+          });
+        }
+      }
+    }
+
+    // Validate required fields
+    if (!orderData.items || orderData.items.length === 0) {
+      return sendResponse({
+        res,
+        statusCode: 400,
+        success: false,
+        message: 'At least one item is required'
+      });
+    }
+
+    if (!orderData.shippingAddress || !orderData.shippingAddress.street) {
+      return sendResponse({
+        res,
+        statusCode: 400,
+        success: false,
+        message: 'Shipping address is required'
+      });
+    }
+
+    // Process items and validate products
+    for (const item of orderData.items) {
+      const product = await Product.findById(item.product);
+      if (!product) {
+        return sendResponse({
+          res,
+          statusCode: 400,
+          success: false,
+          message: `Product not found: ${item.product}`
+        });
+      }
+
+      // Check stock availability
+      if (item.variant && item.variant.sku) {
+        const variant = product.variants.find(v => v.sku === item.variant.sku);
+        if (!variant) {
+          return sendResponse({
+            res,
+            statusCode: 400,
+            success: false,
+            message: `Variant not found: ${item.variant.sku}`
+          });
+        }
+        if (variant.stockQuantity < item.quantity) {
+          return sendResponse({
+            res,
+            statusCode: 400,
+            success: false,
+            message: `Insufficient stock for variant ${item.variant.sku}`
+          });
+        }
+      } else {
+        if (product.totalStock < item.quantity) {
+          return sendResponse({
+            res,
+            statusCode: 400,
+            success: false,
+            message: `Insufficient stock for product ${product.title}`
+          });
+        }
+      }
+    }
+
+    // Set default values for guest orders
+    orderData.status = 'pending';
+    orderData.paymentStatus = orderData.paymentStatus || 'pending';
+    orderData.statusTimestamps = {
+      pending: new Date()
+    };
+
+    // Create the order
+    const order = new Order(orderData);
+    await order.save();
+
+    // Update product stock
+    for (const item of order.items) {
+      if (item.variant && item.variant.sku) {
+        // Update variant stock
+        const result = await Product.findOneAndUpdate(
+          { 
+            _id: item.product,
+            'variants.sku': item.variant.sku 
+          },
+          { 
+            $inc: { 'variants.$.stockQuantity': -item.quantity }
+          },
+          { new: true }
+        );
+        
+        if (result) {
+          // Update totalStock
+          const updatedTotalStock = result.variants.reduce((total, variant) => total + (variant.stockQuantity || 0), 0);
+          await Product.findByIdAndUpdate(item.product, { totalStock: updatedTotalStock });
+        }
+      } else {
+        // Update main product stock
+        await Product.findByIdAndUpdate(
+          item.product,
+          { $inc: { totalStock: -item.quantity } },
+          { new: true }
+        );
+      }
+    }
+
+    // Populate the created order for response
+    const populatedOrder = await Order.findById(order._id)
+      .populate('items.product', 'title featuredImage slug');
+
+    return sendResponse({
+      res,
+      statusCode: 201,
+      success: true,
+      message: 'Guest order created successfully',
+      data: populatedOrder,
     });
   } catch (error) {
     return sendResponse({
