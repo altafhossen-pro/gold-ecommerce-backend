@@ -23,6 +23,11 @@ const userSchema = new mongoose.Schema({
     enum: ['customer', 'admin', 'seller'],
     default: 'customer',
   },
+  roleId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Role',
+    default: null,
+  },
   status: {
     type: String,
     enum: ['active', 'inactive', 'banned', 'deleted'],

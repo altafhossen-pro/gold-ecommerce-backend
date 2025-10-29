@@ -6,6 +6,7 @@ const verifyTokenAdmin = require('../../middlewares/verifyTokenAdmin');
 
 // Public routes
 router.post('/validate', couponController.validateCoupon);
+router.get('/public', couponController.getPublicCoupons);
 
 // Admin routes (protected)
 router.get('/', verifyToken, verifyTokenAdmin, couponController.getAllCoupons);

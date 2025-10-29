@@ -40,37 +40,42 @@ exports.getDashboardStats = async (req, res) => {
     const totalCategories = await Category.countDocuments({ isActive: true });
     const totalCoupons = await Coupon.countDocuments({ isActive: true });
 
-    // Order statistics (all time)
-    const totalOrders = await Order.countDocuments();
-    const paidOrders = await Order.countDocuments({ paymentStatus: 'paid' });
-    const pendingOrders = await Order.countDocuments({ status: 'pending' });
-    const confirmedOrders = await Order.countDocuments({ status: 'confirmed' });
-    const shippedOrders = await Order.countDocuments({ status: 'shipped' });
-    const deliveredOrders = await Order.countDocuments({ status: 'delivered' });
-    const cancelledOrders = await Order.countDocuments({ status: 'cancelled' });
-    const returnedOrders = await Order.countDocuments({ status: 'returned' });
+    // Order statistics (all time, excluding deleted)
+    const totalOrders = await Order.countDocuments({ isDeleted: false });
+    const paidOrders = await Order.countDocuments({ paymentStatus: 'paid', isDeleted: false });
+    const pendingOrders = await Order.countDocuments({ status: 'pending', isDeleted: false });
+    const confirmedOrders = await Order.countDocuments({ status: 'confirmed', isDeleted: false });
+    const shippedOrders = await Order.countDocuments({ status: 'shipped', isDeleted: false });
+    const deliveredOrders = await Order.countDocuments({ status: 'delivered', isDeleted: false });
+    const cancelledOrders = await Order.countDocuments({ status: 'cancelled', isDeleted: false });
+    const returnedOrders = await Order.countDocuments({ status: 'returned', isDeleted: false });
 
-    // Period-based order statistics
+    // Period-based order statistics (excluding deleted)
     const periodOrders = await Order.countDocuments({ 
-      createdAt: { $gte: startDate } 
+      createdAt: { $gte: startDate },
+      isDeleted: false
     });
     const periodPaidOrders = await Order.countDocuments({ 
       paymentStatus: 'paid',
-      createdAt: { $gte: startDate } 
+      createdAt: { $gte: startDate },
+      isDeleted: false
     });
     const periodDeliveredOrders = await Order.countDocuments({ 
       status: 'delivered',
-      createdAt: { $gte: startDate } 
+      createdAt: { $gte: startDate },
+      isDeleted: false
     });
 
     // Revenue calculations - include delivered orders even if payment is pending (for COD)
+    // Excluding deleted orders
     const totalSalesAgg = await Order.aggregate([
       { 
         $match: { 
           $or: [
             { paymentStatus: 'paid' },
             { status: 'delivered' } // Include delivered orders (COD orders)
-          ]
+          ],
+          isDeleted: false
         } 
       },
       { $group: { _id: null, total: { $sum: '$total' } } }
@@ -78,6 +83,7 @@ exports.getDashboardStats = async (req, res) => {
     const totalSales = totalSalesAgg[0]?.total || 0;
 
     // Period-based sales - include delivered orders even if payment is pending (for COD)
+    // Excluding deleted orders
     const periodSalesAgg = await Order.aggregate([
       { 
         $match: { 
@@ -85,7 +91,8 @@ exports.getDashboardStats = async (req, res) => {
             { paymentStatus: 'paid' },
             { status: 'delivered' } // Include delivered orders (COD orders)
           ],
-          createdAt: { $gte: startDate }
+          createdAt: { $gte: startDate },
+          isDeleted: false
         } 
       },
       { $group: { _id: null, total: { $sum: '$total' } } }
@@ -93,6 +100,7 @@ exports.getDashboardStats = async (req, res) => {
     const periodSales = periodSalesAgg[0]?.total || 0;
 
     // Previous period for comparison - include delivered orders even if payment is pending (for COD)
+    // Excluding deleted orders
     const previousStartDate = new Date(startDate.getTime() - (now.getTime() - startDate.getTime()));
     const previousSalesAgg = await Order.aggregate([
       { 
@@ -101,7 +109,8 @@ exports.getDashboardStats = async (req, res) => {
             { paymentStatus: 'paid' },
             { status: 'delivered' } // Include delivered orders (COD orders)
           ],
-          createdAt: { $gte: previousStartDate, $lt: startDate }
+          createdAt: { $gte: previousStartDate, $lt: startDate },
+          isDeleted: false
         } 
       },
       { $group: { _id: null, total: { $sum: '$total' } } }
@@ -139,9 +148,10 @@ exports.getDashboardStats = async (req, res) => {
       product.calculatedTotalStock = product.variants.reduce((total, variant) => total + (variant.stockQuantity || 0), 0);
     });
 
-    // Recent orders (period-based)
+    // Recent orders (period-based, excluding deleted)
     const recentOrders = await Order.find({
-      createdAt: { $gte: startDate }
+      createdAt: { $gte: startDate },
+      isDeleted: false
     })
       .sort({ createdAt: -1 })
       .limit(10)
@@ -159,19 +169,22 @@ exports.getDashboardStats = async (req, res) => {
     };
 
     // Payment method distribution - include delivered orders even if payment is pending (for COD)
+    // Excluding deleted orders
     const paymentMethodAgg = await Order.aggregate([
       { 
         $match: { 
           $or: [
             { paymentStatus: 'paid' },
             { status: 'delivered' } // Include delivered orders (COD orders)
-          ]
+          ],
+          isDeleted: false
         } 
       },
       { $group: { _id: '$paymentMethod', count: { $sum: 1 }, total: { $sum: '$total' } } }
     ]);
 
     // Monthly sales data for chart - include delivered orders even if payment is pending (for COD)
+    // Excluding deleted orders
     const monthlySales = await Order.aggregate([
       {
         $match: {
@@ -179,7 +192,8 @@ exports.getDashboardStats = async (req, res) => {
             { paymentStatus: 'paid' },
             { status: 'delivered' } // Include delivered orders (COD orders)
           ],
-          createdAt: { $gte: new Date(now.getTime() - 6 * 30 * 24 * 60 * 60 * 1000) }
+          createdAt: { $gte: new Date(now.getTime() - 6 * 30 * 24 * 60 * 60 * 1000) },
+          isDeleted: false
         }
       },
       {
@@ -284,7 +298,8 @@ exports.getSalesAnalytics = async (req, res) => {
       $or: [
         { paymentStatus: 'paid' },
         { status: 'delivered' } // Include delivered orders (COD orders)
-      ]
+      ],
+      isDeleted: false
     };
     if (startDate && endDate) {
       matchStage.createdAt = {
@@ -448,8 +463,11 @@ exports.getCustomerAnalytics = async (req, res) => {
       { $sort: { '_id.year': 1, '_id.month': 1 } }
     ]);
 
-    // Customer order statistics
+    // Customer order statistics (excluding deleted orders)
     const customerOrderStats = await Order.aggregate([
+      {
+        $match: { isDeleted: false }
+      },
       {
         $group: {
           _id: '$user',
@@ -472,6 +490,7 @@ exports.getCustomerAnalytics = async (req, res) => {
     ]);
 
     // Customer lifetime value - include delivered orders even if payment is pending (for COD)
+    // Excluding deleted orders
     const totalCustomers = await User.countDocuments();
     const totalRevenue = await Order.aggregate([
       { 
@@ -479,7 +498,8 @@ exports.getCustomerAnalytics = async (req, res) => {
           $or: [
             { paymentStatus: 'paid' },
             { status: 'delivered' } // Include delivered orders (COD orders)
-          ]
+          ],
+          isDeleted: false
         } 
       },
       { $group: { _id: null, total: { $sum: '$total' } } }

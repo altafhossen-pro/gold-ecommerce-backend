@@ -26,7 +26,8 @@ const getPaginatedProducts = async (filter, req, res, message) => {
         { shortDescription: { $regex: searchQuery, $options: 'i' } },
         { description: { $regex: searchQuery, $options: 'i' } },
         { tags: { $in: [new RegExp(searchQuery, 'i')] } },
-        { brand: { $regex: searchQuery, $options: 'i' } }
+        { brand: { $regex: searchQuery, $options: 'i' } },
+        { 'variants.sku': { $regex: searchQuery, $options: 'i' } }
       ];
     }
 
@@ -164,6 +165,67 @@ exports.createProduct = async (req, res) => {
 
 exports.getProducts = async (req, res) => {
   return getPaginatedProducts({}, req, res, 'Products fetched successfully');
+};
+
+// Admin: Get all products with search, filter, and pagination
+exports.getAdminProducts = async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 50;
+    const skip = (page - 1) * limit;
+    const sort = req.query.sort || '-createdAt';
+    const searchQuery = req.query.search || '';
+    const statusFilter = req.query.status || req.query.filterStatus; // Support both 'status' and 'filterStatus'
+
+    // Build base filter (admin sees all products, including inactive)
+    const queryFilter = {};
+
+    // Status filter (if not 'all')
+    if (statusFilter && statusFilter !== 'all') {
+      queryFilter.status = statusFilter;
+    }
+
+    // Search functionality - includes SKU, title, slug, brand
+    if (searchQuery) {
+      queryFilter.$or = [
+        { title: { $regex: searchQuery, $options: 'i' } },
+        { slug: { $regex: searchQuery, $options: 'i' } },
+        { shortDescription: { $regex: searchQuery, $options: 'i' } },
+        { description: { $regex: searchQuery, $options: 'i' } },
+        { tags: { $in: [new RegExp(searchQuery, 'i')] } },
+        { brand: { $regex: searchQuery, $options: 'i' } },
+        { 'variants.sku': { $regex: searchQuery, $options: 'i' } }
+      ];
+    }
+
+    const total = await Product.countDocuments(queryFilter);
+    const products = await Product.find(queryFilter)
+      .populate('category')
+      .sort(sort)
+      .skip(skip)
+      .limit(limit);
+
+    return sendResponse({
+      res,
+      statusCode: 200,
+      success: true,
+      message: 'Admin products fetched successfully',
+      data: products,
+      pagination: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
+      },
+    });
+  } catch (error) {
+    return sendResponse({
+      res,
+      statusCode: 500,
+      success: false,
+      message: error.message || 'Server error',
+    });
+  }
 };
 
 exports.getFeaturedProducts = async (req, res) => {
@@ -305,7 +367,8 @@ exports.searchProducts = async (req, res) => {
         { shortDescription: { $regex: searchQuery, $options: 'i' } },
         { description: { $regex: searchQuery, $options: 'i' } },
         { tags: { $in: [new RegExp(searchQuery, 'i')] } },
-        { brand: { $regex: searchQuery, $options: 'i' } }
+        { brand: { $regex: searchQuery, $options: 'i' } },
+        { 'variants.sku': { $regex: searchQuery, $options: 'i' } }
       ];
     }
 
@@ -524,7 +587,10 @@ exports.getProductBySlug = async (req, res) => {
 exports.getProductById = async (req, res) => {
   try {
     const { id } = req.params;
-    const product = await Product.findById(id);
+    const product = await Product.findById(id)
+      .populate('category')
+      .populate('subCategories');
+    
     if (!product) {
       return sendResponse({
         res,
@@ -538,6 +604,40 @@ exports.getProductById = async (req, res) => {
       statusCode: 200,
       success: true,
       message: 'Product fetched successfully',
+      data: product,
+    });
+  } catch (error) {
+    return sendResponse({
+      res,
+      statusCode: 500,
+      success: false,
+      message: error.message || 'Server error',
+    });
+  }
+};
+
+// Admin: Get single product by ID (with all details, no filtering by active status)
+exports.getAdminProductById = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const product = await Product.findById(id)
+      .populate('category')
+      .populate('subCategories');
+    
+    if (!product) {
+      return sendResponse({
+        res,
+        statusCode: 404,
+        success: false,
+        message: 'Product not found',
+      });
+    }
+    
+    return sendResponse({
+      res,
+      statusCode: 200,
+      success: true,
+      message: 'Admin product fetched successfully',
       data: product,
     });
   } catch (error) {

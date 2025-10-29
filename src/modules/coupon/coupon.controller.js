@@ -94,6 +94,45 @@ exports.getCouponById = async (req, res) => {
   }
 };
 
+// Get public coupons (Public - no authentication required)
+exports.getPublicCoupons = async (req, res) => {
+  try {
+    const { limit = 20 } = req.query;
+    
+    // Filter for publicly visible, active, and non-expired coupons
+    const filter = {
+      isActive: true,
+      isShowOnPublicly: true,
+      endDate: { $gt: new Date() }
+    };
+
+    const coupons = await Coupon.find(filter)
+      .select('code discountType discountValue maxUsage usedCount endDate minOrderAmount description isActive isShowOnPublicly')
+      .sort({ createdAt: -1 })
+      .limit(parseInt(limit));
+
+    // Filter out coupons that have reached max usage
+    const validCoupons = coupons.filter(coupon => {
+      return !coupon.maxUsage || coupon.usedCount < coupon.maxUsage;
+    });
+
+    return sendResponse({
+      res,
+      statusCode: 200,
+      success: true,
+      message: 'Public coupons fetched successfully',
+      data: validCoupons
+    });
+  } catch (error) {
+    return sendResponse({
+      res,
+      statusCode: 500,
+      success: false,
+      message: error.message
+    });
+  }
+};
+
 // Validate coupon code (Public)
 exports.validateCoupon = async (req, res) => {
   try {

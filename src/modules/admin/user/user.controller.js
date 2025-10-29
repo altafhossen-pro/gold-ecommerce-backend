@@ -1,7 +1,7 @@
 const { User } = require('../../../modules/user/user.model');
 const sendResponse = require('../../../utils/sendResponse');
 const jwtService = require('../../../services/jwtService');
-
+const bcrypt = require('bcryptjs');
 exports.listUsers = async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
@@ -71,7 +71,11 @@ exports.getUserById = async (req, res) => {
 
 exports.updateUser = async (req, res) => {
   try {
-    const user = await User.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    // Remove role from body - role is always "customer" now, admin access is via roleId
+    const updateData = { ...req.body };
+    delete updateData.role; // Don't allow role string to be updated
+    
+    const user = await User.findByIdAndUpdate(req.params.id, updateData, { new: true });
     if (!user) return sendResponse({ res, statusCode: 404, success: false, message: 'User not found' });
     return sendResponse({ res, statusCode: 200, success: true, message: 'User updated', data: user });
   } catch (error) {
@@ -164,8 +168,7 @@ exports.adminLogin = async (req, res) => {
       });
     }
 
-    // Verify password
-    const bcrypt = require('bcryptjs');
+    
     const isPasswordValid = await bcrypt.compare(password, admin.password);
     if (!isPasswordValid) {
       return sendResponse({

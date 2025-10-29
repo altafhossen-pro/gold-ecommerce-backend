@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const productController = require('./product.controller');
 const verifyTokenAdmin = require('../../middlewares/verifyTokenAdmin');
+const { checkPermission } = require('../../middlewares/checkPermission');
 
 // Special product lists
 router.get('/featured', productController.getFeaturedProducts);
@@ -15,12 +16,17 @@ router.get('/similar/:productId', productController.getSimilarProducts);
 // Stock checking
 router.post('/check-stock', productController.checkStockAvailability);
 
-// CRUD
-router.post('/', productController.createProduct);
+// Public routes
 router.get('/', productController.getProducts);
 router.get('/slug/:slug', productController.getProductBySlug);
 router.get('/:id', productController.getProductById);
-router.patch('/:id', verifyTokenAdmin, productController.updateProduct);
-router.delete('/:id', productController.deleteProduct);
+
+// Admin routes with permission checks
+// Note: Specific routes (like /admin/list) should come before dynamic routes (like /admin/:id)
+router.get('/admin/list', verifyTokenAdmin, checkPermission('product', 'read'), productController.getAdminProducts);
+router.get('/admin/:id', verifyTokenAdmin, checkPermission('product', 'read'), productController.getAdminProductById);
+router.post('/', verifyTokenAdmin, checkPermission('product', 'create'), productController.createProduct);
+router.patch('/:id', verifyTokenAdmin, checkPermission('product', 'update'), productController.updateProduct);
+router.delete('/:id', verifyTokenAdmin, checkPermission('product', 'delete'), productController.deleteProduct);
 
 module.exports = router;

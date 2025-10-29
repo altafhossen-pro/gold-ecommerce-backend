@@ -22,6 +22,8 @@ const heroProductRoutes = require('../modules/heroProduct/heroProduct.route');
 const inventoryRoutes = require('../modules/inventory/inventory.route');
 const upsellRoutes = require('../modules/upsell/upsell.routes');
 const addressRoutes = require('../modules/address/address.route');
+const adsRoutes = require('../modules/ads/ads.route');
+const roleRoutes = require('../modules/role/role.route');
 
 router.use('/user', userRoutes);
 router.use('/otp', otpRoutes);
@@ -44,6 +46,8 @@ router.use('/hero-product', heroProductRoutes);
 router.use('/inventory', inventoryRoutes);
 router.use('/upsell', upsellRoutes);
 router.use('/address', addressRoutes);
+router.use('/ads', adsRoutes);
+router.use('/admin/role', roleRoutes);
 
 // Health check route
 router.get('/health', (req, res) => {

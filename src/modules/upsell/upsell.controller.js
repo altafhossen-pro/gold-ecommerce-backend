@@ -533,12 +533,7 @@ const getUpsellsByMainProductPublic = async (req, res) => {
       link.product.status === 'published'
     );
 
-    // Debug: Log the linked products data
-    console.log('Linked products data:', upsell.linkedProducts.map(link => ({
-      title: link.product.title,
-      totalStock: link.product.totalStock,
-      variants: link.product.variants?.length || 0
-    })));
+    
 
     return sendResponse({
       res,

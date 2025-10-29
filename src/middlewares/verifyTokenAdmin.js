@@ -62,8 +62,36 @@ const verifyTokenAdmin = async (req, res, next) => {
             });
         }
 
-        // Check if user is admin (you can modify this logic based on your admin system)
-        if (!user.is_admin && !user.role === 'admin') {
+        // Check if user is admin - Admin access is via roleId only
+        let isAdmin = false;
+
+        // NEW SYSTEM: Check roleId (role-based system)
+        if (user.roleId) {
+            const { Role } = require('../modules/role/role.model');
+            const role = await Role.findById(user.roleId);
+            
+            if (role && role.isActive) {
+                // Super admin or any role with admin permissions
+                if (role.isSuperAdmin) {
+                    isAdmin = true;
+                } else {
+                    // Check if role has any admin-level permissions
+                    await role.populate('permissions');
+                    // If role has permissions, consider them admin
+                    if (role.permissions && role.permissions.length > 0) {
+                        isAdmin = true;
+                    }
+                }
+            }
+        }
+
+        // OLD SYSTEM: Backward compatibility - only check if no roleId (for existing admin users without roleId)
+        // This is only for backward compatibility during migration
+        if (!isAdmin && !user.roleId && (user.role === 'admin' || user.is_admin)) {
+            isAdmin = true;
+        }
+
+        if (!isAdmin) {
             return sendResponse({
                 res,
                 statusCode: 403,

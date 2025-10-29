@@ -59,6 +59,12 @@ const couponSchema = new mongoose.Schema({
     default: true
   },
   
+  // Public Visibility
+  isShowOnPublicly: {
+    type: Boolean,
+    default: false
+  },
+  
   // Description
   description: {
     type: String,

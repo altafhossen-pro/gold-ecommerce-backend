@@ -120,13 +120,65 @@ exports.login = async (req, res) => {
 exports.getProfile = async (req, res) => {
   try {
     // Assume req.userId is set by auth middleware
-    const user = req.user;
+    const { User } = require('./user.model');
+    const { Role } = require('../role/role.model');
+    
+    const user = await User.findById(req.user._id || req.user.id)
+      .populate('roleId')
+      .select('-password');
+    
+    if (!user) {
+      return sendResponse({
+        res,
+        statusCode: 404,
+        success: false,
+        message: 'User not found',
+      });
+    }
+
+    // Get permissions if user has a role
+    let permissions = [];
+    let role = null;
+    
+    if (user.roleId && typeof user.roleId === 'object') {
+      role = user.roleId;
+      
+      // Populate permissions
+      await role.populate('permissions');
+      
+      if (role.permissions && role.permissions.length > 0) {
+        permissions = role.permissions.map(p => ({
+          _id: p._id,
+          module: p.module,
+          action: p.action,
+          description: p.description,
+          category: p.category,
+        }));
+      }
+    }
+
+    // Format user data with role and permissions
+    const userData = {
+      ...user.toObject(),
+      roleDetails: role ? {
+        _id: role._id,
+        name: role.name,
+        slug: role.slug,
+        description: role.description,
+        isSuperAdmin: role.isSuperAdmin,
+        isDefault: role.isDefault,
+        isActive: role.isActive,
+        permissions: permissions,
+      } : null,
+      permissions: permissions, // Direct access to permissions array
+    };
+
     return sendResponse({
       res,
       statusCode: 200,
       success: true,
       message: 'Profile fetched successfully',
-      data: user,
+      data: userData,
     });
   } catch (error) {
     return sendResponse({
