@@ -15,7 +15,7 @@ const permissions = [
   { module: 'order', action: 'delete', description: 'Delete orders', category: 'order' },
 
   // User Permissions
-  { module: 'user', action: 'create', description: 'Create users', category: 'user' },
+  // { module: 'user', action: 'create', description: 'Create users', category: 'user' },
   { module: 'user', action: 'read', description: 'View users', category: 'user' },
   { module: 'user', action: 'update', description: 'Update users', category: 'user' },
   { module: 'user', action: 'delete', description: 'Delete users', category: 'user' },
@@ -52,20 +52,23 @@ const permissions = [
   { module: 'testimonial', action: 'update', description: 'Update testimonials', category: 'content' },
   { module: 'testimonial', action: 'delete', description: 'Delete testimonials', category: 'content' },
 
-  { module: 'menu', action: 'create', description: 'Create menus', category: 'content' },
-  { module: 'menu', action: 'read', description: 'View menus', category: 'content' },
-  { module: 'menu', action: 'update', description: 'Update menus', category: 'content' },
-  { module: 'menu', action: 'delete', description: 'Delete menus', category: 'content' },
+  // { module: 'menu', action: 'create', description: 'Create menus', category: 'content' },
+  // { module: 'menu', action: 'read', description: 'View menus', category: 'content' },
+  // { module: 'menu', action: 'update', description: 'Update menus', category: 'content' },
+  // { module: 'menu', action: 'delete', description: 'Delete menus', category: 'content' },
 
   // Analytics Permissions
   { module: 'analytics', action: 'read', description: 'View analytics', category: 'analytics' },
-  { module: 'analytics', action: 'export', description: 'Export analytics', category: 'analytics' },
+  // { module: 'analytics', action: 'export', description: 'Export analytics', category: 'analytics' },
 
   // Role & Permission Management
   { module: 'role', action: 'create', description: 'Create roles', category: 'system' },
   { module: 'role', action: 'read', description: 'View roles', category: 'system' },
   { module: 'role', action: 'update', description: 'Update roles', category: 'system' },
   { module: 'role', action: 'delete', description: 'Delete roles', category: 'system' },
+
+  // system admin delete user permissions
+  { module: 'admin', action: 'delete', description: 'Delete Admin', category: 'admin' },
 ];
 
 const seedPermissions = async () => {

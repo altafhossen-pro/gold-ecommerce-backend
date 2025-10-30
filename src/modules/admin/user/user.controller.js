@@ -1,6 +1,8 @@
 const { User } = require('../../../modules/user/user.model');
+const { Role } = require('../../role/role.model');
 const sendResponse = require('../../../utils/sendResponse');
 const jwtService = require('../../../services/jwtService');
+const { checkUserPermission } = require('../../../middlewares/checkPermission');
 const bcrypt = require('bcryptjs');
 exports.listUsers = async (req, res) => {
   try {
@@ -37,6 +39,7 @@ exports.listUsers = async (req, res) => {
     const total = await User.countDocuments(queryFilter);
     const users = await User.find(queryFilter)
       .select('-password')
+      .populate('roleId', 'name isSuperAdmin')
       .sort(sort)
       .skip(skip)
       .limit(limit);
@@ -71,11 +74,75 @@ exports.getUserById = async (req, res) => {
 
 exports.updateUser = async (req, res) => {
   try {
-    // Remove role from body - role is always "customer" now, admin access is via roleId
     const updateData = { ...req.body };
-    delete updateData.role; // Don't allow role string to be updated
     
-    const user = await User.findByIdAndUpdate(req.params.id, updateData, { new: true });
+    // Check if user is trying to update their own account
+    const isSelfUpdate = String(req.params.id) === String(req.user._id);
+    
+    // Resolve requester super admin status
+    let requesterIsSuperAdmin = false;
+    if (req.user?.roleId) {
+      const requesterRole = await Role.findById(req.user.roleId);
+      requesterIsSuperAdmin = !!requesterRole?.isSuperAdmin;
+    }
+    
+    // Check if email is being updated - only Super Admin can change emails
+    if (Object.prototype.hasOwnProperty.call(updateData, 'email')) {
+      // Fetch the current user to compare email
+      const currentUser = await User.findById(req.params.id);
+      if (currentUser && currentUser.email !== updateData.email) {
+        // Email is being changed
+        if (!requesterIsSuperAdmin) {
+          return sendResponse({ res, statusCode: 403, success: false, message: "Only Super Admin can change email addresses" });
+        }
+      }
+    }
+    
+    // Check if roleId is being updated
+    if (Object.prototype.hasOwnProperty.call(updateData, 'roleId')) {
+      // Check if user has manage_roles permission
+      const hasManageRolesPermission = await checkUserPermission(req.user, 'user', 'manage_roles');
+      if (!requesterIsSuperAdmin && !hasManageRolesPermission) {
+        return sendResponse({ res, statusCode: 403, success: false, message: "You don't have permission to manage user roles" });
+      }
+      
+      // Prevent non-Super Admin users from updating their own role
+      if (isSelfUpdate && !requesterIsSuperAdmin) {
+        return sendResponse({ res, statusCode: 403, success: false, message: "You cannot update your own role. Only Super Admin can update their own role." });
+      }
+      
+      const roleIdValue = updateData.roleId;
+      const hasAdminRole = roleIdValue && String(roleIdValue).trim().length > 0;
+      
+      // If assigning a role, check if it's a Super Admin role
+      if (hasAdminRole) {
+        const assignedRole = await Role.findById(roleIdValue);
+        if (assignedRole?.isSuperAdmin) {
+          // Check if requester is Super Admin
+          if (!requesterIsSuperAdmin) {
+            return sendResponse({ res, statusCode: 403, success: false, message: "Only Super Admin can assign Super Admin role" });
+          }
+        }
+      }
+    }
+    
+    // Determine legacy role string based on roleId presence
+    // If roleId provided (non-empty), treat as admin access; otherwise default to customer
+    let updateQuery = { $set: updateData };
+    if (Object.prototype.hasOwnProperty.call(updateData, 'roleId')) {
+      const roleIdValue = updateData.roleId;
+      const hasAdminRole = roleIdValue && String(roleIdValue).trim().length > 0;
+      updateQuery.$set.role = hasAdminRole ? 'admin' : 'customer';
+      if (!hasAdminRole) {
+        // Ensure roleId is removed from the document entirely
+        if (!updateQuery.$unset) updateQuery.$unset = {};
+        updateQuery.$unset.roleId = "";
+        // Also prevent setting roleId with empty values in $set
+        delete updateQuery.$set.roleId;
+      }
+    }
+
+    const user = await User.findByIdAndUpdate(req.params.id, updateQuery, { new: true });
     if (!user) return sendResponse({ res, statusCode: 404, success: false, message: 'User not found' });
     return sendResponse({ res, statusCode: 200, success: true, message: 'User updated', data: user });
   } catch (error) {
@@ -83,10 +150,51 @@ exports.updateUser = async (req, res) => {
   }
 };
 
+
+
 exports.deleteUser = async (req, res) => {
   try {
-    const user = await User.findByIdAndDelete(req.params.id);
-    if (!user) return sendResponse({ res, statusCode: 404, success: false, message: 'User not found' });
+    const targetUser = await User.findById(req.params.id);
+    if (!targetUser) return sendResponse({ res, statusCode: 404, success: false, message: 'User not found' });
+
+    // Prevent self-delete
+    if (String(targetUser._id) === String(req.user._id)) {
+      return sendResponse({ res, statusCode: 403, success: false, message: "You cannot delete your own account" });
+    }
+
+    // Determine roles
+    const targetIsAdmin = targetUser.role === 'admin' || !!targetUser.roleId;
+
+    // Resolve requester super admin status
+    let requesterIsSuperAdmin = false;
+    if (req.user?.roleId) {
+      const role = await Role.findById(req.user.roleId);
+      requesterIsSuperAdmin = !!role?.isSuperAdmin;
+    }
+
+    if (targetIsAdmin) {
+      // Only super admin can delete any admin; or roles with explicit admin.delete can delete admins (but not super admins)
+      const hasAdminDelete = await checkUserPermission(req.user, 'admin', 'delete');
+
+      // Prevent deleting super admin unless requester is super admin
+      let targetIsSuperAdmin = false;
+      if (targetUser.roleId) {
+        const targetRole = await Role.findById(targetUser.roleId);
+        targetIsSuperAdmin = !!targetRole?.isSuperAdmin;
+      }
+
+      if (targetIsSuperAdmin && !requesterIsSuperAdmin) {
+        return sendResponse({ res, statusCode: 403, success: false, message: "Only Super Admin can delete a Super Admin" });
+      }
+
+      if (!requesterIsSuperAdmin && !hasAdminDelete) {
+        return sendResponse({ res, statusCode: 403, success: false, message: "You don't have permission to delete admin users" });
+      }
+    } else {
+      // Non-admin (customers) are covered by route 'user.delete', no extra checks
+    }
+
+    await User.findByIdAndDelete(targetUser._id);
     return sendResponse({ res, statusCode: 200, success: true, message: 'User deleted' });
   } catch (error) {
     return sendResponse({ res, statusCode: 500, success: false, message: error.message });

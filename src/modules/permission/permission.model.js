@@ -18,7 +18,7 @@ const permissionSchema = new mongoose.Schema({
   },
   category: {
     type: String,
-    enum: ['product', 'order', 'user', 'category', 'coupon', 'settings', 'content', 'analytics', 'system'],
+    enum: ['product', 'order', 'user', 'category', 'coupon', 'settings', 'content', 'analytics', 'system','admin'],
     required: true,
     index: true,
   },
