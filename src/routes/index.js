@@ -3,6 +3,7 @@ const router = express.Router();
 
 const userRoutes = require('../modules/user/user.route');
 const otpRoutes = require('../modules/otp/otp.route');
+const googleAuthRoutes = require('../modules/auth/googleAuth.route');
 const categoryRoutes = require('../modules/category/category.route');
 const productRoutes = require('../modules/product/product.route');
 const couponRoutes = require('../modules/coupon/coupon.route');
@@ -27,6 +28,7 @@ const roleRoutes = require('../modules/role/role.route');
 
 router.use('/user', userRoutes);
 router.use('/otp', otpRoutes);
+router.use('/auth/google', googleAuthRoutes);
 router.use('/category', categoryRoutes);
 router.use('/product', productRoutes);
 router.use('/coupon', couponRoutes);

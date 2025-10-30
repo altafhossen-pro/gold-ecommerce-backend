@@ -6,8 +6,8 @@ const { uploadSingle, handleUploadError, generateFileUrl, deleteFile } = require
 
 exports.signup = async (req, res) => {
   try {
-    const { name, email, phone, password } = req.body;
-    if (!name || !email || !phone || !password) {
+    const { name, email, password } = req.body;
+    if (!name || !email || !password) {
       return sendResponse({
         res,
         statusCode: 400,
@@ -17,13 +17,13 @@ exports.signup = async (req, res) => {
     }
 
     // Check if user already exists
-    const existingUser = await User.findOne({ $or: [{ email }, { phone }] });
+    const existingUser = await User.findOne({ email });
     if (existingUser) {
       return sendResponse({
         res,
         statusCode: 409,
         success: false,
-        message: 'User with this email or phone already exists',
+        message: 'User with this email already exists',
       });
     }
 
@@ -34,8 +34,8 @@ exports.signup = async (req, res) => {
     const user = new User({
       name,
       email,
-      phone,
       password: hashedPassword,
+      registerType: 'email', // Track that user registered via email
     });
     await user.save();
 

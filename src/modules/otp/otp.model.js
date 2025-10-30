@@ -3,8 +3,14 @@ const mongoose = require('mongoose');
 const otpSchema = new mongoose.Schema({
   phone: { 
     type: String, 
-    required: true, 
+    required: false, 
     index: true 
+  },
+  email: {
+    type: String,
+    required: false,
+    lowercase: true,
+    index: true
   },
   otp: { 
     type: String, 
@@ -36,8 +42,17 @@ const otpSchema = new mongoose.Schema({
   timestamps: true
 });
 
+// Validation: either phone or email must be provided
+otpSchema.pre('save', function(next) {
+  if (!this.phone && !this.email) {
+    return next(new Error('Either phone or email must be provided'));
+  }
+  next();
+});
+
 // Index for efficient queries
 otpSchema.index({ phone: 1, isUsed: 1 });
+otpSchema.index({ email: 1, isUsed: 1 });
 otpSchema.index({ expiresAt: 1 });
 
 const OTP = mongoose.model('OTP', otpSchema);

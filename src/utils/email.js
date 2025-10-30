@@ -28,7 +28,7 @@ const sendEmail = async (to, subject, text, html = null) => {
         const transporter = createTransporter();
 
         const mailOptions = {
-            from: process.env.EMAIL_FROM || process.env.EMAIL_USER,
+            from: process.env.EMAIL_FROM || process.env.SMTP_EMAIL || 'noreply@forpink.com',
             to: to,
             subject: subject,
             text: text
@@ -53,19 +53,72 @@ const sendEmail = async (to, subject, text, html = null) => {
 
 // Send OTP email specifically
 const sendOTPEmail = async (email, otp) => {
-    const subject = 'Your OTP Verification Code';
-    const text = `Your OTP code is: ${otp}. This code will expire in 5 minutes. Please do not share this code with anyone.`;
+    const subject = 'Your Forpink Register OTP';
+    const text = `Your Forpink register OTP is: ${otp}. This code will expire in 5 minutes. Please do not share this code with anyone.`;
 
     const html = `
-    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-      <h2 style="color: #333;">OTP Verification</h2>
-      <p>Your OTP verification code is:</p>
-      <div style="background: #f4f4f4; padding: 20px; text-align: center; font-size: 24px; font-weight: bold; letter-spacing: 3px; margin: 20px 0;">
-        ${otp}
-      </div>
-      <p style="color: #666;">This code will expire in 5 minutes.</p>
-      <p style="color: #666;">Please do not share this code with anyone.</p>
-    </div>
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    </head>
+    <body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f8f9fa;">
+      <table role="presentation" style="width: 100%; border-collapse: collapse; background-color: #f8f9fa; padding: 20px 0;">
+        <tr>
+          <td align="center">
+            <table role="presentation" style="width: 600px; border-collapse: collapse; background-color: #ffffff; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); overflow: hidden;">
+              <!-- Header -->
+              <tr>
+                <td style="background: linear-gradient(135deg, #ec4899 0%, #be185d 100%); padding: 40px 40px 30px; text-align: center;">
+                  <h1 style="margin: 0; color: #ffffff; font-size: 28px; font-weight: 600; letter-spacing: -0.5px;">Forpink</h1>
+                  <p style="margin: 8px 0 0; color: #fce7f3; font-size: 14px; font-weight: 400;">Your trusted shopping partner</p>
+                </td>
+              </tr>
+              
+              <!-- Content -->
+              <tr>
+                <td style="padding: 40px;">
+                  <h2 style="margin: 0 0 20px; color: #1f2937; font-size: 22px; font-weight: 600;">Email Verification</h2>
+                  <p style="margin: 0 0 24px; color: #4b5563; font-size: 15px; line-height: 1.6;">
+                    Thank you for registering with Forpink! Your register OTP is:
+                  </p>
+                  
+                  <!-- OTP Box -->
+                  <div style="background: linear-gradient(135deg, #fdf2f8 0%, #fce7f3 100%); border: 2px solid #fbcfe8; border-radius: 12px; padding: 30px; text-align: center; margin: 30px 0;">
+                    <p style="margin: 0 0 12px; color: #9f1239; font-size: 13px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px;">Your Verification Code</p>
+                    <div style="font-size: 36px; font-weight: 700; letter-spacing: 8px; color: #be185d; font-family: 'Courier New', monospace; margin: 8px 0;">
+                      ${otp}
+                    </div>
+                  </div>
+                  
+                  <p style="margin: 24px 0 0; color: #6b7280; font-size: 14px; line-height: 1.6;">
+                    This code will expire in <strong style="color: #be185d;">5 minutes</strong>. Please use it to complete your registration.
+                  </p>
+                  
+                  <p style="margin: 20px 0 0; color: #9ca3af; font-size: 13px; line-height: 1.6;">
+                    <strong style="color: #6b7280;">⚠️ Security Notice:</strong> Never share this code with anyone. Forpink will never ask for your OTP.
+                  </p>
+                </td>
+              </tr>
+              
+              <!-- Footer -->
+              <tr>
+                <td style="background-color: #f9fafb; padding: 30px 40px; text-align: center; border-top: 1px solid #e5e7eb;">
+                  <p style="margin: 0 0 8px; color: #6b7280; font-size: 13px;">
+                    If you didn't request this code, please ignore this email.
+                  </p>
+                  <p style="margin: 0; color: #9ca3af; font-size: 12px;">
+                    © ${new Date().getFullYear()} Forpink. All rights reserved.
+                  </p>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
+    </body>
+    </html>
   `;
 
     return await sendEmail(email, subject, text, html);

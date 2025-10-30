@@ -1,0 +1,166 @@
+const { User } = require('../user/user.model');
+const sendResponse = require('../../utils/sendResponse');
+const jwtService = require('../../services/jwtService');
+const axios = require('axios');
+const bcrypt = require('bcryptjs');
+const querystring = require('querystring');
+
+// Google OAuth credentials
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID ;
+const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET ;
+const FRONTEND_URL = process.env.FRONTEND_URL;
+const BACKEND_URL = process.env.BASE_URL ;
+
+/**
+ * Initiate Google OAuth - returns redirect URL
+ */
+exports.initiateGoogleAuth = async (req, res) => {
+  try {
+    const redirectUri = `${BACKEND_URL}/api/v1/auth/google/callback`;
+    const scope = 'openid email profile';
+    const responseType = 'code';
+    const state = req.query.state || 'default'; // Can be used to track login vs register
+
+    // Build Google OAuth URL
+    const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
+      `client_id=${GOOGLE_CLIENT_ID}&` +
+      `redirect_uri=${encodeURIComponent(redirectUri)}&` +
+      `response_type=${responseType}&` +
+      `scope=${encodeURIComponent(scope)}&` +
+      `state=${state}&` +
+      `access_type=offline&` +
+      `prompt=consent`;
+
+    return sendResponse({
+      res,
+      statusCode: 200,
+      success: true,
+      message: 'Google OAuth URL generated',
+      data: {
+        authUrl,
+        redirectUri
+      }
+    });
+  } catch (error) {
+    console.error('Initiate Google Auth error:', error);
+    return sendResponse({
+      res,
+      statusCode: 500,
+      success: false,
+      message: error.message || 'Failed to initiate Google authentication',
+    });
+  }
+};
+
+/**
+ * Handle Google OAuth callback
+ */
+exports.googleCallback = async (req, res) => {
+  try {
+    const { code, state } = req.query;
+
+    if (!code) {
+      // Redirect to frontend with error
+      return res.redirect(`${FRONTEND_URL}/login?error=google_auth_failed`);
+    }
+
+    // Exchange authorization code for access token
+    const tokenData = {
+      client_id: GOOGLE_CLIENT_ID,
+      client_secret: GOOGLE_CLIENT_SECRET,
+      code: code,
+      grant_type: 'authorization_code',
+      redirect_uri: `${BACKEND_URL}/api/v1/auth/google/callback`,
+    };
+
+    const tokenResponse = await axios.post('https://oauth2.googleapis.com/token', querystring.stringify(tokenData), {
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+    });
+
+    const { access_token, id_token } = tokenResponse.data;
+
+    if (!access_token) {
+      return res.redirect(`${FRONTEND_URL}/login?error=token_exchange_failed`);
+    }
+
+    // Get user info from Google
+    const userInfoResponse = await axios.get('https://www.googleapis.com/oauth2/v2/userinfo', {
+      headers: {
+        Authorization: `Bearer ${access_token}`,
+      },
+    });
+
+    const googleUser = userInfoResponse.data;
+    const { id: googleId, email, name, picture } = googleUser;
+
+    if (!email) {
+      return res.redirect(`${FRONTEND_URL}/login?error=no_email_provided`);
+    }
+
+    // Check if user exists by email
+    let user = await User.findOne({ email: email.toLowerCase() });
+
+    if (!user) {
+      // Create new user
+      // Generate a random password for OAuth users (they won't use it)
+      const randomPassword = Math.random().toString(36).slice(-12) + Date.now().toString(36);
+      const hashedPassword = await bcrypt.hash(randomPassword, 10);
+
+      user = new User({
+        name: name || email.split('@')[0],
+        email: email.toLowerCase(),
+        password: hashedPassword,
+        avatar: picture || null,
+        emailVerified: true, // Google emails are verified
+        registerType: 'google', // Track registration method
+        role: 'customer',
+        status: 'active',
+        googleId: googleId, // Store Google ID
+      });
+
+      await user.save();
+    } else {
+      // Update existing user with Google info if needed
+      if (!user.googleId) {
+        user.googleId = googleId;
+      }
+      if (picture && !user.avatar) {
+        user.avatar = picture;
+      }
+      user.emailVerified = true;
+      user.lastLogin = new Date();
+      await user.save();
+    }
+
+    // Generate JWT token
+    const token = jwtService.generateAccessToken(user._id);
+
+    // Remove password from user object
+    const userObj = user.toObject();
+    delete userObj.password;
+
+    // Redirect to frontend with token and user data
+    // Using URL params to pass data
+    const redirectParams = querystring.stringify({
+      token: token,
+      userId: user._id.toString(),
+      name: userObj.name,
+      email: userObj.email,
+      role: userObj.role,
+    });
+
+    const redirectUrl = `${FRONTEND_URL}/auth/google/success?${redirectParams}`;
+
+    return res.redirect(redirectUrl);
+
+  } catch (error) {
+    console.error('Google callback error:', error);
+    
+    // Redirect to frontend with error
+    const errorMessage = error.response?.data?.error_description || error.message || 'google_auth_failed';
+    return res.redirect(`${FRONTEND_URL}/login?error=${encodeURIComponent(errorMessage)}`);
+  }
+};
+

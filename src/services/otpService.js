@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const { sendOTPSMS } = require('../utils/smsService');
 
 class OTPService {
   constructor() {
@@ -12,43 +13,29 @@ class OTPService {
    * @returns {string} 6-digit OTP
    */
   generateOTP() {
-    // For testing, return default OTP
-    // In production, uncomment the line below and remove the return statement
-    // return crypto.randomInt(100000, 999999).toString();
-    return this.defaultOTP;
+    // Always generate random OTP for both development and production
+    return crypto.randomInt(100000, 999999).toString();
   }
 
   /**
-   * Send OTP to phone number
+   * Send OTP to phone number via SMS
    * @param {string} phone - Phone number
    * @param {string} otp - OTP to send
+   * @param {string} brandName - Optional brand name (defaults to env variable or 'Forpink')
    * @returns {Promise<boolean>} Success status
    */
-  async sendOTP(phone, otp) {
+  async sendOTP(phone, otp, brandName = null) {
     try {
-      // For testing purposes, we'll just log the OTP
-      // In production, integrate with SMS service like Twilio, AWS SNS, etc.
-      
-      // Simulate API call delay
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      // For testing, always return success
-      return true;
-      
-      // Production code example (uncomment when ready):
-      /*
-      const accountSid = process.env.TWILIO_ACCOUNT_SID;
-      const authToken = process.env.TWILIO_AUTH_TOKEN;
-      const client = require('twilio')(accountSid, authToken);
+      // Send OTP via SMS using the SMS service utility
+      const result = await sendOTPSMS(phone, otp, brandName);
 
-      const message = await client.messages.create({
-        body: `Your OTP for login is: ${otp}. This OTP is valid for ${this.otpExpiryMinutes} minutes.`,
-        from: process.env.TWILIO_PHONE_NUMBER,
-        to: phone
-      });
-
-      return message.sid ? true : false;
-      */
+      if (result.success) {
+        console.log(`OTP sent successfully to ${phone}`);
+        return true;
+      } else {
+        console.error(`Failed to send OTP to ${phone}:`, result.error);
+        return false;
+      }
     } catch (error) {
       console.error('Error sending OTP:', error);
       return false;

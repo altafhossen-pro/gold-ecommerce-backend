@@ -12,8 +12,8 @@ const addressSchema = new mongoose.Schema({
 
 const userSchema = new mongoose.Schema({
   name: { type: String, required: true },
-  phone: { type: String, required: true, unique: true, index: true },
-  email: { type: String, required: true, unique: true, lowercase: true, index: true },
+  phone: { type: String, required: false, unique: true, sparse: true, index: true },
+  email: { type: String, required: false, unique: true, sparse: true, lowercase: true, index: true },
   password: { type: String, required: true },
   avatar: { type: String },
   address: { type: String },
@@ -37,6 +37,12 @@ const userSchema = new mongoose.Schema({
   deletedAt: { type: Date },
   emailVerified: { type: Boolean, default: false },
   phoneVerified: { type: Boolean, default: false },
+  registerType: {
+    type: String,
+    enum: ['email', 'phone', 'google'],
+    default: null, // null for existing users
+  },
+  googleId: { type: String, sparse: true, unique: true }, // Google user ID
   lastLogin: { type: Date },
   wishlist: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Product' }],
   cart: [{
