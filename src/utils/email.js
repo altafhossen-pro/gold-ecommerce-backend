@@ -1,67 +1,112 @@
 const nodemailer = require('nodemailer');
 
 // Create transporter (configure according to your email service)
-const createTransporter = () => {
+// Try multiple ports and configurations if one fails
+const createTransporter = (portToTry = null) => {
   const isProduction = process.env.NODE_ENV === 'production';
   
-  // Base configuration for both development and production
-  const transporterConfig = {
-    service: 'gmail', // or your email service
+  // Try different ports if VPS blocks standard SMTP ports
+  const tryPorts = portToTry ? [portToTry] : [587, 465, 25];
+  const trySecure = portToTry === 465 ? [true] : portToTry === 587 ? [false] : [false, true];
+  
+  let transporterConfig;
+  
+  // Try to find a working port configuration
+  for (const port of tryPorts) {
+    for (const secure of trySecure) {
+      if (port === 465 && !secure) continue; // Port 465 must be secure
+      if (port === 587 && secure) continue; // Port 587 uses STARTTLS (secure: false)
+      
+      transporterConfig = {
+        service: 'gmail',
+        host: 'smtp.gmail.com',
+        port: port,
+        secure: secure, // true for 465, false for 587 (STARTTLS)
+        auth: {
+          user: process.env.SMTP_EMAIL,
+          pass: process.env.SMTP_PASSWORD
+        },
+        tls: {
+          rejectUnauthorized: false
+        }
+      };
+
+      // Production-specific settings
+      if (isProduction) {
+        transporterConfig.connectionTimeout = 120000; // 120 seconds (2 minutes)
+        transporterConfig.greetingTimeout = 60000; // 60 seconds
+        transporterConfig.socketTimeout = 120000; // 120 seconds (2 minutes)
+        transporterConfig.pool = false;
+        transporterConfig.maxConnections = 1;
+        transporterConfig.maxMessages = 1;
+        transporterConfig.rateDelta = 1000;
+        transporterConfig.rateLimit = 14;
+        transporterConfig.requireTLS = !secure; // Only for STARTTLS (port 587)
+        transporterConfig.debug = false;
+        transporterConfig.ignoreTLS = false;
+      } else {
+        // Development mode
+        transporterConfig.connectionTimeout = 10000;
+        transporterConfig.greetingTimeout = 5000;
+        transporterConfig.socketTimeout = 10000;
+      }
+
+      return nodemailer.createTransport(transporterConfig);
+    }
+  }
+  
+  // Fallback to default (port 587)
+  transporterConfig = {
+    service: 'gmail',
     host: 'smtp.gmail.com',
     port: 587,
-    secure: false, // true for 465, false for other ports (587 uses STARTTLS)
+    secure: false,
     auth: {
-      user: process.env.SMTP_EMAIL, // Your email
-      pass: process.env.SMTP_PASSWORD  // Your email password or app password
+      user: process.env.SMTP_EMAIL,
+      pass: process.env.SMTP_PASSWORD
     },
     tls: {
-      // Do not fail on invalid certs (for both dev and prod)
       rejectUnauthorized: false
     }
   };
 
-  // Production-specific settings (timeouts, pooling, rate limiting)
   if (isProduction) {
-    transporterConfig.connectionTimeout = 120000; // 120 seconds (2 minutes) - increased for production network delays
-    transporterConfig.greetingTimeout = 60000; // 60 seconds
-    transporterConfig.socketTimeout = 120000; // 120 seconds (2 minutes)
-    transporterConfig.pool = false; // Disable pooling to avoid connection issues
-    transporterConfig.maxConnections = 1; // Single connection for reliability
-    transporterConfig.maxMessages = 1; // One message per connection
-    transporterConfig.rateDelta = 1000; // 1 second
-    transporterConfig.rateLimit = 14; // 14 emails per rateDelta
-    // Additional production settings for better reliability
+    transporterConfig.connectionTimeout = 120000;
+    transporterConfig.greetingTimeout = 60000;
+    transporterConfig.socketTimeout = 120000;
+    transporterConfig.pool = false;
+    transporterConfig.maxConnections = 1;
+    transporterConfig.maxMessages = 1;
     transporterConfig.requireTLS = true;
-    transporterConfig.debug = false; // Set to true for debugging
-    transporterConfig.ignoreTLS = false;
   } else {
-    // Development mode - faster timeouts for quick feedback
-    transporterConfig.connectionTimeout = 10000; // 10 seconds
-    transporterConfig.greetingTimeout = 5000; // 5 seconds
-    transporterConfig.socketTimeout = 10000; // 10 seconds
+    transporterConfig.connectionTimeout = 10000;
+    transporterConfig.greetingTimeout = 5000;
+    transporterConfig.socketTimeout = 10000;
   }
 
   return nodemailer.createTransport(transporterConfig);
 };
 
-// Send email function with retry mechanism
-const sendEmail = async (to, subject, text, html = null, retryCount = 0) => {
-  const MAX_RETRIES = 2; // Maximum 2 retries
+// Send email function with retry mechanism and port fallback
+const sendEmail = async (to, subject, text, html = null, retryCount = 0, portAttempt = 0) => {
+  const MAX_RETRIES = 2; // Maximum 2 retries per port
+  const MAX_PORT_ATTEMPTS = 3; // Try 3 different ports (587, 465, 25)
   const isProduction = process.env.NODE_ENV === 'production';
   const timeoutDuration = isProduction ? 90000 : 15000; // Production: 90s, Development: 15s
+  const portsToTry = [587, 465, 25];
   let transporter;
 
   try {
-    transporter = createTransporter();
+    const currentPort = portsToTry[portAttempt] || 587;
+    transporter = createTransporter(currentPort);
 
-    // Skip verification in production (faster, and timeout already configured)
-    // Verify connection before sending (only in development for quick feedback)
+    // Skip verification in production (faster)
     if (!isProduction) {
       try {
         await transporter.verify();
-        console.log('Email server connection verified');
+        console.log(`Email server connection verified on port ${currentPort}`);
       } catch (verifyError) {
-        console.warn('Email server verification failed, but continuing:', verifyError.message);
+        console.warn(`Email server verification failed on port ${currentPort}, but continuing:`, verifyError.message);
       }
     }
 
@@ -77,11 +122,11 @@ const sendEmail = async (to, subject, text, html = null, retryCount = 0) => {
       mailOptions.html = html;
     }
 
-    // Send email with timeout (different for dev/prod)
+    // Send email with timeout
     const result = await Promise.race([
       transporter.sendMail(mailOptions),
       new Promise((_, reject) => 
-        setTimeout(() => reject(new Error(`Email sending timeout after ${timeoutDuration / 1000} seconds`)), timeoutDuration)
+        setTimeout(() => reject(new Error(`Email sending timeout after ${timeoutDuration / 1000} seconds on port ${currentPort}`)), timeoutDuration)
       )
     ]);
 
@@ -91,7 +136,7 @@ const sendEmail = async (to, subject, text, html = null, retryCount = 0) => {
     };
 
   } catch (error) {
-    console.error(`Email sending error (attempt ${retryCount + 1}/${MAX_RETRIES + 1}):`, error.message);
+    console.error(`Email sending error (port ${portsToTry[portAttempt] || 587}, attempt ${retryCount + 1}/${MAX_RETRIES + 1}):`, error.message);
     
     // Close transporter connection on error
     if (transporter) {
@@ -102,12 +147,19 @@ const sendEmail = async (to, subject, text, html = null, retryCount = 0) => {
       }
     }
     
-    // Retry logic for connection timeout errors (only in production)
-    if (isProduction && retryCount < MAX_RETRIES && (error.code === 'ETIMEDOUT' || error.message.includes('timeout') || error.message.includes('Connection'))) {
-      console.log(`Retrying email send (attempt ${retryCount + 2}/${MAX_RETRIES + 1})...`);
-      // Wait a bit before retry (exponential backoff)
+    // Try different port if current port fails (only for connection errors)
+    if (isProduction && portAttempt < MAX_PORT_ATTEMPTS - 1 && (error.code === 'ETIMEDOUT' || error.message.includes('timeout') || error.message.includes('Connection') || error.code === 'ECONNREFUSED')) {
+      const nextPort = portsToTry[portAttempt + 1];
+      console.log(`Port ${portsToTry[portAttempt] || 587} failed, trying port ${nextPort}...`);
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      return sendEmail(to, subject, text, html, 0, portAttempt + 1);
+    }
+    
+    // Retry logic for same port (if all ports tried and still error)
+    if (isProduction && retryCount < MAX_RETRIES && portAttempt >= MAX_PORT_ATTEMPTS - 1) {
+      console.log(`Retrying email send on port ${portsToTry[portAttempt] || 587} (attempt ${retryCount + 2}/${MAX_RETRIES + 1})...`);
       await new Promise(resolve => setTimeout(resolve, 2000 * (retryCount + 1)));
-      return sendEmail(to, subject, text, html, retryCount + 1);
+      return sendEmail(to, subject, text, html, retryCount + 1, portAttempt);
     }
     
     throw new Error('Failed to send email: ' + error.message);
