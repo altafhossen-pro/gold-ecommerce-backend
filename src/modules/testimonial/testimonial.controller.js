@@ -1,4 +1,4 @@
-const { Testimonial } = require('./testimonial.model');
+const { Testimonial } = require('./testimonial.model.js');
 const sendResponse = require('../../utils/sendResponse');
 
 // Get all testimonials
