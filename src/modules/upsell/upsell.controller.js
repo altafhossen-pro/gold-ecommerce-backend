@@ -141,11 +141,43 @@ const createUpsell = async (req, res) => {
       }
     }
 
+    // Validate discount fields if provided
+    const { hasDiscount, discountType, discountValue } = req.body;
+    if (hasDiscount) {
+      if (!discountType || !['percentage', 'fixed'].includes(discountType)) {
+        return sendResponse({
+          res,
+          statusCode: 400,
+          success: false,
+          message: 'Invalid discount type. Must be "percentage" or "fixed"',
+        });
+      }
+      if (discountValue === undefined || discountValue === null || discountValue < 0) {
+        return sendResponse({
+          res,
+          statusCode: 400,
+          success: false,
+          message: 'Invalid discount value. Must be a positive number',
+        });
+      }
+      if (discountType === 'percentage' && discountValue > 100) {
+        return sendResponse({
+          res,
+          statusCode: 400,
+          success: false,
+          message: 'Percentage discount cannot exceed 100%',
+        });
+      }
+    }
+
     // Create upsell
     const upsellData = {
       mainProduct,
       createdBy: userId,
-      linkedProducts: linkedProducts || []
+      linkedProducts: linkedProducts || [],
+      hasDiscount: hasDiscount || false,
+      discountType: hasDiscount ? discountType : 'percentage',
+      discountValue: hasDiscount ? discountValue : 0
     };
 
     const upsell = new Upsell(upsellData);
@@ -179,7 +211,7 @@ const createUpsell = async (req, res) => {
 const updateUpsell = async (req, res) => {
   try {
     const { id } = req.params;
-    const { isActive } = req.body;
+    const { isActive, hasDiscount, discountType, discountValue } = req.body;
     const userId = req.user.id;
 
     const upsell = await Upsell.findById(id);
@@ -195,6 +227,83 @@ const updateUpsell = async (req, res) => {
     // Update fields
     if (isActive !== undefined) {
       upsell.isActive = isActive;
+    }
+
+    // Update discount fields if provided
+    if (hasDiscount !== undefined) {
+      upsell.hasDiscount = hasDiscount;
+      
+      if (hasDiscount) {
+        // Validate discount type and value if discount is enabled
+        if (discountType && !['percentage', 'fixed'].includes(discountType)) {
+          return sendResponse({
+            res,
+            statusCode: 400,
+            success: false,
+            message: 'Invalid discount type. Must be "percentage" or "fixed"',
+          });
+        }
+        if (discountType) {
+          upsell.discountType = discountType;
+        }
+        
+        if (discountValue !== undefined && discountValue !== null) {
+          if (discountValue < 0) {
+            return sendResponse({
+              res,
+              statusCode: 400,
+              success: false,
+              message: 'Discount value cannot be negative',
+            });
+          }
+          if (upsell.discountType === 'percentage' && discountValue > 100) {
+            return sendResponse({
+              res,
+              statusCode: 400,
+              success: false,
+              message: 'Percentage discount cannot exceed 100%',
+            });
+          }
+          upsell.discountValue = discountValue;
+        }
+      } else {
+        // Reset discount fields if discount is disabled
+        upsell.discountType = 'percentage';
+        upsell.discountValue = 0;
+      }
+    } else {
+      // If hasDiscount is not provided but discountType/discountValue are, update them
+      if (discountType && upsell.hasDiscount) {
+        if (!['percentage', 'fixed'].includes(discountType)) {
+          return sendResponse({
+            res,
+            statusCode: 400,
+            success: false,
+            message: 'Invalid discount type. Must be "percentage" or "fixed"',
+          });
+        }
+        upsell.discountType = discountType;
+      }
+      
+      if (discountValue !== undefined && discountValue !== null && upsell.hasDiscount) {
+        if (discountValue < 0) {
+          return sendResponse({
+            res,
+            statusCode: 400,
+            success: false,
+            message: 'Discount value cannot be negative',
+          });
+        }
+        if (upsell.discountType === 'percentage' && discountValue > 100) {
+          return sendResponse({
+            res,
+            statusCode: 400,
+            success: false,
+            message: 'Percentage discount cannot exceed 100%',
+          });
+        }
+        upsell.discountValue = discountValue;
+      }
     }
 
     upsell.updatedBy = userId;
@@ -514,7 +623,7 @@ const getUpsellsByMainProductPublic = async (req, res) => {
         select: 'sku attributes currentPrice originalPrice stockQuantity stockStatus'
       }
     })
-    .select('mainProduct linkedProducts isActive');
+    .select('mainProduct linkedProducts isActive hasDiscount discountType discountValue');
 
     if (!upsell) {
       return sendResponse({
@@ -640,6 +749,139 @@ const searchProductsForLinking = async (req, res) => {
   }
 };
 
+// Calculate upsell discounts for cart items
+const calculateCartDiscounts = async (req, res) => {
+  try {
+    const { cartItems } = req.body;
+
+    if (!cartItems || !Array.isArray(cartItems) || cartItems.length === 0) {
+      return sendResponse({
+        res,
+        statusCode: 400,
+        success: false,
+        message: 'Cart items are required',
+      });
+    }
+
+    // Extract product IDs from cart items
+    const productIds = cartItems.map(item => item.productId || item._id).filter(Boolean);
+    
+    if (productIds.length === 0) {
+      return sendResponse({
+        res,
+        statusCode: 200,
+        success: true,
+        message: 'No discounts available',
+        data: {
+          applicableDiscounts: [],
+          totalDiscount: 0,
+          discounts: []
+        },
+      });
+    }
+
+    // Find all active upsells where linked products match cart items
+    const upsells = await Upsell.find({
+      isActive: true,
+      hasDiscount: true,
+      discountValue: { $gt: 0 },
+      'linkedProducts.isActive': true
+    })
+    .populate('linkedProducts.product', 'priceRange')
+    .select('mainProduct linkedProducts hasDiscount discountType discountValue');
+
+    const applicableDiscounts = [];
+
+    // Check each upsell to see if all linked products are in cart
+    for (const upsell of upsells) {
+      if (!upsell.hasDiscount || !upsell.discountValue) continue;
+
+      const linkedProductIds = upsell.linkedProducts
+        .filter(link => link.isActive && link.product)
+        .map(link => link.product._id.toString());
+
+      // Check if all linked products are in cart
+      const allProductsInCart = linkedProductIds.every(linkedId => 
+        productIds.some(cartId => cartId.toString() === linkedId)
+      );
+
+      if (allProductsInCart && linkedProductIds.length > 0) {
+        // Calculate total price of linked products in cart
+        const linkedProductsTotal = upsell.linkedProducts
+          .filter(link => link.isActive && link.product)
+          .reduce((total, link) => {
+            const productId = link.product._id.toString();
+            const cartItem = cartItems.find(item => 
+              (item.productId || item._id).toString() === productId
+            );
+            
+            if (cartItem) {
+              // Use cart item total (price * quantity) if available, otherwise calculate
+              if (cartItem.total) {
+                return total + cartItem.total;
+              }
+              const itemPrice = cartItem.price || cartItem.productInfo?.price || link.product.priceRange?.min || 0;
+              const quantity = cartItem.quantity || 1;
+              return total + (itemPrice * quantity);
+            }
+            return total;
+          }, 0);
+
+        // Calculate discount amount
+        let discountAmount = 0;
+        if (upsell.discountType === 'percentage') {
+          discountAmount = (linkedProductsTotal * upsell.discountValue) / 100;
+        } else {
+          // Fixed discount
+          discountAmount = Math.min(upsell.discountValue, linkedProductsTotal);
+        }
+
+        if (discountAmount > 0) {
+          applicableDiscounts.push({
+            upsellId: upsell._id,
+            mainProduct: upsell.mainProduct,
+            linkedProductIds: linkedProductIds,
+            discountType: upsell.discountType,
+            discountValue: upsell.discountValue,
+            linkedProductsTotal: linkedProductsTotal,
+            discountAmount: discountAmount,
+            productCount: linkedProductIds.length
+          });
+        }
+      }
+    }
+
+    // Calculate total discount
+    const totalDiscount = applicableDiscounts.reduce((sum, discount) => sum + discount.discountAmount, 0);
+
+    return sendResponse({
+      res,
+      statusCode: 200,
+      success: true,
+      message: 'Discount calculation completed',
+      data: {
+        applicableDiscounts: applicableDiscounts,
+        totalDiscount: totalDiscount,
+        discounts: applicableDiscounts.map(d => ({
+          upsellId: d.upsellId,
+          productIds: d.linkedProductIds,
+          discountType: d.discountType,
+          discountValue: d.discountValue,
+          discountAmount: d.discountAmount,
+          productCount: d.productCount
+        }))
+      },
+    });
+  } catch (error) {
+    return sendResponse({
+      res,
+      statusCode: 500,
+      success: false,
+      message: error.message || 'Server error',
+    });
+  }
+};
+
 module.exports = {
   getAllUpsells,
   getUpsellById,
@@ -653,5 +895,6 @@ module.exports = {
   getUpsellsByMainProduct,
   getUpsellsByMainProductPublic,
   getUpsellsByLinkedProduct,
-  searchProductsForLinking
+  searchProductsForLinking,
+  calculateCartDiscounts
 };

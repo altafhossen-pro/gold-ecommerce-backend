@@ -8,6 +8,7 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "seed": "node scripts/seedData.js",
     "seed:reset": "node scripts/seedData.js --reset",
+    "seed:permissions": "node scripts/seedData.js",
     "init:roles": "node src/scripts/initRoles.js",
     "clean:manage": "node src/scripts/removeManagePermissions.js",
     "clean:cancel": "node src/scripts/removeOrderCancelPermission.js",

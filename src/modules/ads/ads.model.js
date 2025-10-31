@@ -38,7 +38,7 @@ const adsSchema = new mongoose.Schema({
     },
     position: {
         type: String,
-        enum: ['homepage-banner', 'homepage-sidebar', 'product-page', 'category-page', 'search-page'],
+        enum: ['homepage-banner', 'product-page', 'category-page', 'search-page','shop-page'],
         default: 'homepage-banner'
     },
     clickCount: {

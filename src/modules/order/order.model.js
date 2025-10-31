@@ -81,6 +81,7 @@ const orderSchema = new mongoose.Schema({
     },
     total: { type: Number, required: true },
     discount: { type: Number, default: 0 },
+    upsellDiscount: { type: Number, default: 0 },
     loyaltyDiscount: { type: Number, default: 0 },
     loyaltyPointsUsed: { type: Number, default: 0 },
     shippingCost: { type: Number, default: 0 },

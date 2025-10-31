@@ -26,6 +26,31 @@ const upsellSchema = new mongoose.Schema({
       default: Date.now
     }
   }],
+  // Discount settings for upsell products
+  hasDiscount: {
+    type: Boolean,
+    default: false
+  },
+  discountType: {
+    type: String,
+    enum: ['percentage', 'fixed'],
+    default: 'percentage'
+  },
+  discountValue: {
+    type: Number,
+    default: 0,
+    min: 0,
+    validate: {
+      validator: function(value) {
+        if (!this.hasDiscount) return true;
+        if (this.discountType === 'percentage') {
+          return value >= 0 && value <= 100;
+        }
+        return value >= 0;
+      },
+      message: 'Invalid discount value. Percentage must be 0-100, fixed amount must be >= 0'
+    }
+  },
   isActive: {
     type: Boolean,
     default: true

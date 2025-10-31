@@ -33,6 +33,11 @@ const permissions = [
   { module: 'coupon', action: 'update', description: 'Update coupons', category: 'coupon' },
   { module: 'coupon', action: 'delete', description: 'Delete coupons', category: 'coupon' },
 
+  { module: 'ads', action: 'create', description: 'Create ads', category: 'ads' },
+  { module: 'ads', action: 'read', description: 'View ads', category: 'ads' },
+  { module: 'ads', action: 'update', description: 'Update ads', category: 'ads' },
+  { module: 'ads', action: 'delete', description: 'Delete ads', category: 'ads' },
+
   // Inventory Permissions
   { module: 'inventory', action: 'read', description: 'View inventory', category: 'system' },
   { module: 'inventory', action: 'update', description: 'Update inventory', category: 'system' },

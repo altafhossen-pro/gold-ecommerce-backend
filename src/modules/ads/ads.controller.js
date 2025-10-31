@@ -1,6 +1,6 @@
 const Ads = require('./ads.model');
-const Product = require('../product/product.model');
-const { sendResponse } = require('../../utils/sendResponse');
+const { Product } = require('../product/product.model');
+const sendResponse = require('../../utils/sendResponse');
 
 // Create new ad
 exports.createAd = async (req, res) => {

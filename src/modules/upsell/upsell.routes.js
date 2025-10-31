@@ -13,13 +13,17 @@ const {
   getUpsellsByMainProduct,
   getUpsellsByMainProductPublic,
   getUpsellsByLinkedProduct,
-  searchProductsForLinking
+  searchProductsForLinking,
+  calculateCartDiscounts
 } = require('./upsell.controller');
 const verifyTokenAdmin = require('../../middlewares/verifyTokenAdmin');
 
 // Public routes (no authentication required)
 // Get upsells by main product (Public)
 router.get('/public/main-product/:productId', getUpsellsByMainProductPublic);
+
+// Calculate cart discounts (Public - no auth required)
+router.post('/calculate-discount', calculateCartDiscounts);
 
 // Apply admin authentication to all routes below
 router.use(verifyTokenAdmin);
