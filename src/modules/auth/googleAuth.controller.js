@@ -4,18 +4,35 @@ const jwtService = require('../../services/jwtService');
 const axios = require('axios');
 const bcrypt = require('bcryptjs');
 const querystring = require('querystring');
+require('dotenv').config(); // Ensure dotenv is loaded
 
-// Google OAuth credentials
-const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID ;
-const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET ;
+// Google OAuth credentials - Must be set in environment variables
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
+const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
 const FRONTEND_URL = process.env.FRONTEND_URL;
-const BACKEND_URL = process.env.BASE_URL ;
+const BACKEND_URL = process.env.BACKEND_URL;
 
 /**
  * Initiate Google OAuth - returns redirect URL
  */
 exports.initiateGoogleAuth = async (req, res) => {
   try {
+    // Validate environment variables
+    if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET || !FRONTEND_URL || !BACKEND_URL) {
+      const missingVars = [];
+      if (!GOOGLE_CLIENT_ID) missingVars.push('GOOGLE_CLIENT_ID');
+      if (!GOOGLE_CLIENT_SECRET) missingVars.push('GOOGLE_CLIENT_SECRET');
+      if (!FRONTEND_URL) missingVars.push('FRONTEND_URL');
+      if (!BACKEND_URL) missingVars.push('BACKEND_URL');
+      
+      return sendResponse({
+        res,
+        statusCode: 500,
+        success: false,
+        message: `Google OAuth configuration is missing. Missing variables: ${missingVars.join(', ')}. Please check your .env file.`,
+      });
+    }
+
     const redirectUri = `${BACKEND_URL}/api/v1/auth/google/callback`;
     const scope = 'openid email profile';
     const responseType = 'code';
@@ -42,7 +59,6 @@ exports.initiateGoogleAuth = async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('Initiate Google Auth error:', error);
     return sendResponse({
       res,
       statusCode: 500,
@@ -57,6 +73,12 @@ exports.initiateGoogleAuth = async (req, res) => {
  */
 exports.googleCallback = async (req, res) => {
   try {
+    // Validate environment variables
+    if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET || !FRONTEND_URL || !BACKEND_URL) {
+      // Redirect to frontend with error (callback must redirect, not send JSON)
+      return res.redirect(`${FRONTEND_URL || 'http://localhost:3000'}/login?error=oauth_config_missing`);
+    }
+
     const { code, state } = req.query;
 
     if (!code) {
@@ -156,8 +178,6 @@ exports.googleCallback = async (req, res) => {
     return res.redirect(redirectUrl);
 
   } catch (error) {
-    console.error('Google callback error:', error);
-    
     // Redirect to frontend with error
     const errorMessage = error.response?.data?.error_description || error.message || 'google_auth_failed';
     return res.redirect(`${FRONTEND_URL}/login?error=${encodeURIComponent(errorMessage)}`);
