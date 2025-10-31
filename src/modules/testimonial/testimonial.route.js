@@ -15,6 +15,7 @@ const verifyTokenAdmin = require('../../middlewares/verifyTokenAdmin');
 // Public routes
 router.get('/active', getActiveTestimonials);
 
+
 // Admin routes (protected)
 router.get('/', verifyTokenAdmin, getAllTestimonials);
 router.get('/:id', verifyToken, verifyTokenAdmin, getTestimonialById);
