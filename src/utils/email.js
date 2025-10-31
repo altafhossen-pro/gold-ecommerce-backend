@@ -22,14 +22,18 @@ const createTransporter = () => {
 
   // Production-specific settings (timeouts, pooling, rate limiting)
   if (isProduction) {
-    transporterConfig.connectionTimeout = 60000; // 60 seconds
-    transporterConfig.greetingTimeout = 30000; // 30 seconds
-    transporterConfig.socketTimeout = 60000; // 60 seconds
-    transporterConfig.pool = true;
-    transporterConfig.maxConnections = 5;
-    transporterConfig.maxMessages = 100;
+    transporterConfig.connectionTimeout = 120000; // 120 seconds (2 minutes) - increased for production network delays
+    transporterConfig.greetingTimeout = 60000; // 60 seconds
+    transporterConfig.socketTimeout = 120000; // 120 seconds (2 minutes)
+    transporterConfig.pool = false; // Disable pooling to avoid connection issues
+    transporterConfig.maxConnections = 1; // Single connection for reliability
+    transporterConfig.maxMessages = 1; // One message per connection
     transporterConfig.rateDelta = 1000; // 1 second
     transporterConfig.rateLimit = 14; // 14 emails per rateDelta
+    // Additional production settings for better reliability
+    transporterConfig.requireTLS = true;
+    transporterConfig.debug = false; // Set to true for debugging
+    transporterConfig.ignoreTLS = false;
   } else {
     // Development mode - faster timeouts for quick feedback
     transporterConfig.connectionTimeout = 10000; // 10 seconds
@@ -40,15 +44,17 @@ const createTransporter = () => {
   return nodemailer.createTransport(transporterConfig);
 };
 
-// Send email function
-const sendEmail = async (to, subject, text, html = null) => {
-  let transporter;
+// Send email function with retry mechanism
+const sendEmail = async (to, subject, text, html = null, retryCount = 0) => {
+  const MAX_RETRIES = 2; // Maximum 2 retries
   const isProduction = process.env.NODE_ENV === 'production';
-  const timeoutDuration = isProduction ? 30000 : 15000; // Production: 30s, Development: 15s
+  const timeoutDuration = isProduction ? 90000 : 15000; // Production: 90s, Development: 15s
+  let transporter;
 
   try {
     transporter = createTransporter();
 
+    // Skip verification in production (faster, and timeout already configured)
     // Verify connection before sending (only in development for quick feedback)
     if (!isProduction) {
       try {
@@ -85,11 +91,23 @@ const sendEmail = async (to, subject, text, html = null) => {
     };
 
   } catch (error) {
-    console.error('Email sending error:', error);
+    console.error(`Email sending error (attempt ${retryCount + 1}/${MAX_RETRIES + 1}):`, error.message);
     
     // Close transporter connection on error
     if (transporter) {
-      transporter.close();
+      try {
+        transporter.close();
+      } catch (closeError) {
+        // Ignore close errors
+      }
+    }
+    
+    // Retry logic for connection timeout errors (only in production)
+    if (isProduction && retryCount < MAX_RETRIES && (error.code === 'ETIMEDOUT' || error.message.includes('timeout') || error.message.includes('Connection'))) {
+      console.log(`Retrying email send (attempt ${retryCount + 2}/${MAX_RETRIES + 1})...`);
+      // Wait a bit before retry (exponential backoff)
+      await new Promise(resolve => setTimeout(resolve, 2000 * (retryCount + 1)));
+      return sendEmail(to, subject, text, html, retryCount + 1);
     }
     
     throw new Error('Failed to send email: ' + error.message);
