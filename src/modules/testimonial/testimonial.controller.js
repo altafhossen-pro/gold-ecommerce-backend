@@ -4,8 +4,6 @@ const sendResponse = require('../../utils/sendResponse');
 // Get all testimonials
 const getAllTestimonials = async (req, res) => {
     try {
-        
-        
         const { page = 1, limit = 10, isActive, sort } = req.query;
         
         let query = {};
