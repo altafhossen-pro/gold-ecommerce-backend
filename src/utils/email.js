@@ -2,61 +2,106 @@ const nodemailer = require('nodemailer');
 
 // Create transporter (configure according to your email service)
 const createTransporter = () => {
+  const isProduction = process.env.NODE_ENV === 'production';
+  
+  // Base configuration for both development and production
+  const transporterConfig = {
+    service: 'gmail', // or your email service
+    host: 'smtp.gmail.com',
+    port: 587,
+    secure: false, // true for 465, false for other ports (587 uses STARTTLS)
+    auth: {
+      user: process.env.SMTP_EMAIL, // Your email
+      pass: process.env.SMTP_PASSWORD  // Your email password or app password
+    },
+    tls: {
+      // Do not fail on invalid certs (for both dev and prod)
+      rejectUnauthorized: false
+    }
+  };
 
-    return nodemailer.createTransport({
-        service: 'gmail', // or your email service
-        auth: {
-            user: process.env.SMTP_EMAIL, // Your email
-            pass: process.env.SMTP_PASSWORD  // Your email password or app password
-        }
-        // For other services like Outlook, Yahoo, etc:
-        /*
-        host: 'smtp.gmail.com',
-        port: 587,
-        secure: false,
-        auth: {
-          user: process.env.EMAIL_USER,
-          pass: process.env.EMAIL_PASS
-        }
-        */
-    });
+  // Production-specific settings (timeouts, pooling, rate limiting)
+  if (isProduction) {
+    transporterConfig.connectionTimeout = 60000; // 60 seconds
+    transporterConfig.greetingTimeout = 30000; // 30 seconds
+    transporterConfig.socketTimeout = 60000; // 60 seconds
+    transporterConfig.pool = true;
+    transporterConfig.maxConnections = 5;
+    transporterConfig.maxMessages = 100;
+    transporterConfig.rateDelta = 1000; // 1 second
+    transporterConfig.rateLimit = 14; // 14 emails per rateDelta
+  } else {
+    // Development mode - faster timeouts for quick feedback
+    transporterConfig.connectionTimeout = 10000; // 10 seconds
+    transporterConfig.greetingTimeout = 5000; // 5 seconds
+    transporterConfig.socketTimeout = 10000; // 10 seconds
+  }
+
+  return nodemailer.createTransport(transporterConfig);
 };
 
 // Send email function
 const sendEmail = async (to, subject, text, html = null) => {
-    try {
-        const transporter = createTransporter();
+  let transporter;
+  const isProduction = process.env.NODE_ENV === 'production';
+  const timeoutDuration = isProduction ? 30000 : 15000; // Production: 30s, Development: 15s
 
-        const mailOptions = {
-            from: process.env.EMAIL_FROM || process.env.SMTP_EMAIL || 'noreply@forpink.com',
-            to: to,
-            subject: subject,
-            text: text
-        };
+  try {
+    transporter = createTransporter();
 
-        // If HTML content is provided
-        if (html) {
-            mailOptions.html = html;
-        }
-
-        const result = await transporter.sendMail(mailOptions);
-        return {
-            success: true,
-            messageId: result.messageId
-        };
-
-    } catch (error) {
-        console.error('Email sending error:', error);
-        throw new Error('Failed to send email: ' + error.message);
+    // Verify connection before sending (only in development for quick feedback)
+    if (!isProduction) {
+      try {
+        await transporter.verify();
+        console.log('Email server connection verified');
+      } catch (verifyError) {
+        console.warn('Email server verification failed, but continuing:', verifyError.message);
+      }
     }
+
+    const mailOptions = {
+      from: process.env.EMAIL_FROM || process.env.SMTP_EMAIL || 'noreply@forpink.com',
+      to: to,
+      subject: subject,
+      text: text
+    };
+
+    // If HTML content is provided
+    if (html) {
+      mailOptions.html = html;
+    }
+
+    // Send email with timeout (different for dev/prod)
+    const result = await Promise.race([
+      transporter.sendMail(mailOptions),
+      new Promise((_, reject) => 
+        setTimeout(() => reject(new Error(`Email sending timeout after ${timeoutDuration / 1000} seconds`)), timeoutDuration)
+      )
+    ]);
+
+    return {
+      success: true,
+      messageId: result.messageId
+    };
+
+  } catch (error) {
+    console.error('Email sending error:', error);
+    
+    // Close transporter connection on error
+    if (transporter) {
+      transporter.close();
+    }
+    
+    throw new Error('Failed to send email: ' + error.message);
+  }
 };
 
 // Send OTP email specifically
 const sendOTPEmail = async (email, otp) => {
-    const subject = 'Your Forpink Register OTP';
-    const text = `Your Forpink register OTP is: ${otp}. This code will expire in 5 minutes. Please do not share this code with anyone.`;
+  const subject = 'Your Forpink Register OTP';
+  const text = `Your Forpink register OTP is: ${otp}. This code will expire in 5 minutes. Please do not share this code with anyone.`;
 
-    const html = `
+  const html = `
     <!DOCTYPE html>
     <html>
     <head>
@@ -121,10 +166,10 @@ const sendOTPEmail = async (email, otp) => {
     </html>
   `;
 
-    return await sendEmail(email, subject, text, html);
+  return await sendEmail(email, subject, text, html);
 };
 
 module.exports = {
-    sendEmail,
-    sendOTPEmail
+  sendEmail,
+  sendOTPEmail
 };
