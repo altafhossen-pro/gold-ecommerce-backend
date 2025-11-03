@@ -244,6 +244,41 @@ exports.getBestsellingProducts = async (req, res) => {
   return getPaginatedProducts({ isBestselling: true }, req, res, 'Bestselling products fetched successfully');
 };
 
+// Get products with videos (only products that have at least 1 video)
+exports.getProductVideos = async (req, res) => {
+  try {
+    const products = await Product.find({
+      productVideos: { $exists: true, $ne: [] },
+      isActive: true,
+      status: 'published'
+    })
+      .select('title productVideos slug featuredImage')
+      .sort('-createdAt');
+
+    // Filter out products with empty video arrays (double check)
+    const productsWithVideos = products.filter(product => 
+      product.productVideos && 
+      Array.isArray(product.productVideos) && 
+      product.productVideos.length > 0
+    );
+
+    return sendResponse({
+      res,
+      statusCode: 200,
+      success: true,
+      message: 'Product videos fetched successfully',
+      data: productsWithVideos,
+    });
+  } catch (error) {
+    return sendResponse({
+      res,
+      statusCode: 500,
+      success: false,
+      message: error.message || 'Server error',
+    });
+  }
+};
+
 // Get available filters based on categories
 exports.getAvailableFilters = async (req, res) => {
   try {

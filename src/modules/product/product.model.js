@@ -104,10 +104,11 @@ const productSchema = new mongoose.Schema({
   // Jewelry specific properties
   isBracelet: { type: Boolean, default: false },
   isRing: { type: Boolean, default: false },
-  braceletSizes: [{ type: String }], // Available bracelet sizes
-  ringSizes: [{ type: String }], // Available ring sizes
+  braceletSizes: [{ type: String }], 
+  ringSizes: [{ type: String }], 
   featuredImage: { type: String },
   gallery: [productImageSchema],
+  productVideos: { type: [String], default: [] },
   variants: [productVariantSchema],
   basePrice: { type: Number },
   priceRange: {
