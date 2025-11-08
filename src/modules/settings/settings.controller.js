@@ -219,3 +219,78 @@ exports.updateDeliveryChargeSettings = async (req, res) => {
     });
   }
 };
+
+// Get email & SMS settings
+exports.getEmailSMSSettings = async (req, res) => {
+  try {
+    let settings = await Settings.findOne();
+    
+    // If no settings exist, create default settings
+    if (!settings) {
+      settings = new Settings();
+      await settings.save();
+    }
+    
+    return sendResponse({
+      res,
+      statusCode: 200,
+      success: true,
+      message: 'Email & SMS settings retrieved successfully',
+      data: {
+        isSendOrderConfirmationEmail: settings.isSendOrderConfirmationEmail !== false,
+        isSendGuestOrderConfirmationSMS: settings.isSendGuestOrderConfirmationSMS !== false
+      }
+    });
+  } catch (error) {
+    return sendResponse({
+      res,
+      statusCode: 500,
+      success: false,
+      message: error.message || 'Server error'
+    });
+  }
+};
+
+// Update email & SMS settings
+exports.updateEmailSMSSettings = async (req, res) => {
+  try {
+    const { isSendOrderConfirmationEmail, isSendGuestOrderConfirmationSMS } = req.body;
+    
+    let settings = await Settings.findOne();
+    
+    if (!settings) {
+      // Create new settings if none exist
+      settings = new Settings();
+    }
+    
+    // Update email & SMS settings
+    if (typeof isSendOrderConfirmationEmail === 'boolean') {
+      settings.isSendOrderConfirmationEmail = isSendOrderConfirmationEmail;
+    }
+    if (typeof isSendGuestOrderConfirmationSMS === 'boolean') {
+      settings.isSendGuestOrderConfirmationSMS = isSendGuestOrderConfirmationSMS;
+    }
+    
+    settings.updatedBy = req.user._id;
+    
+    await settings.save();
+    
+    return sendResponse({
+      res,
+      statusCode: 200,
+      success: true,
+      message: 'Email & SMS settings updated successfully',
+      data: {
+        isSendOrderConfirmationEmail: settings.isSendOrderConfirmationEmail,
+        isSendGuestOrderConfirmationSMS: settings.isSendGuestOrderConfirmationSMS
+      }
+    });
+  } catch (error) {
+    return sendResponse({
+      res,
+      statusCode: 500,
+      success: false,
+      message: error.message || 'Server error'
+    });
+  }
+};

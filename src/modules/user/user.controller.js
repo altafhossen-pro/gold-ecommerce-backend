@@ -596,7 +596,7 @@ exports.searchUsers = async (req, res) => {
         { phone: { $regex: query, $options: 'i' } }
       ]
     })
-    .select('name email phone')
+    .select('name email phone address addresses')
     .limit(5);
 
     return sendResponse({

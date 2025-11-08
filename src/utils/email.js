@@ -1,66 +1,11 @@
 const nodemailer = require('nodemailer');
 
 // Create transporter (configure according to your email service)
-// Try multiple ports and configurations if one fails
-const createTransporter = (portToTry = null) => {
-  const isProduction = process.env.NODE_ENV === 'production';
-  
-  // Try different ports if VPS blocks standard SMTP ports
-  const tryPorts = portToTry ? [portToTry] : [587, 465, 25];
-  const trySecure = portToTry === 465 ? [true] : portToTry === 587 ? [false] : [false, true];
-  
-  let transporterConfig;
-  
-  // Try to find a working port configuration
-  for (const port of tryPorts) {
-    for (const secure of trySecure) {
-      if (port === 465 && !secure) continue; // Port 465 must be secure
-      if (port === 587 && secure) continue; // Port 587 uses STARTTLS (secure: false)
-      
-      transporterConfig = {
-        service: 'gmail',
-        host: 'smtp.gmail.com',
-        port: port,
-        secure: secure, // true for 465, false for 587 (STARTTLS)
-        auth: {
-          user: process.env.SMTP_EMAIL,
-          pass: process.env.SMTP_PASSWORD
-        },
-        tls: {
-          rejectUnauthorized: false
-        }
-      };
-
-      // Production-specific settings
-      if (isProduction) {
-        transporterConfig.connectionTimeout = 120000; // 120 seconds (2 minutes)
-        transporterConfig.greetingTimeout = 60000; // 60 seconds
-        transporterConfig.socketTimeout = 120000; // 120 seconds (2 minutes)
-        transporterConfig.pool = false;
-        transporterConfig.maxConnections = 1;
-        transporterConfig.maxMessages = 1;
-        transporterConfig.rateDelta = 1000;
-        transporterConfig.rateLimit = 14;
-        transporterConfig.requireTLS = !secure; // Only for STARTTLS (port 587)
-        transporterConfig.debug = false;
-        transporterConfig.ignoreTLS = false;
-      } else {
-        // Development mode
-        transporterConfig.connectionTimeout = 10000;
-        transporterConfig.greetingTimeout = 5000;
-        transporterConfig.socketTimeout = 10000;
-      }
-
-      return nodemailer.createTransport(transporterConfig);
-    }
-  }
-  
-  // Fallback to default (port 587)
-  transporterConfig = {
-    service: 'gmail',
-    host: 'smtp.gmail.com',
-    port: 587,
-    secure: false,
+const createTransporter = () => {
+  const transporterConfig = {
+    host: process.env.SMTP_HOST || 'smtp.gmail.com',
+    port: parseInt(process.env.SMTP_PORT) || 587,
+    secure: false, // true for 465, false for 587 (STARTTLS)
     auth: {
       user: process.env.SMTP_EMAIL,
       pass: process.env.SMTP_PASSWORD
@@ -70,51 +15,33 @@ const createTransporter = (portToTry = null) => {
     }
   };
 
-  if (isProduction) {
-    transporterConfig.connectionTimeout = 120000;
-    transporterConfig.greetingTimeout = 60000;
-    transporterConfig.socketTimeout = 120000;
-    transporterConfig.pool = false;
-    transporterConfig.maxConnections = 1;
-    transporterConfig.maxMessages = 1;
-    transporterConfig.requireTLS = true;
-  } else {
-    transporterConfig.connectionTimeout = 10000;
-    transporterConfig.greetingTimeout = 5000;
-    transporterConfig.socketTimeout = 10000;
-  }
-
   return nodemailer.createTransport(transporterConfig);
 };
 
-// Send email function with retry mechanism and port fallback
-const sendEmail = async (to, subject, text, html = null, retryCount = 0, portAttempt = 0) => {
-  const MAX_RETRIES = 2; // Maximum 2 retries per port
-  const MAX_PORT_ATTEMPTS = 3; // Try 3 different ports (587, 465, 25)
-  const isProduction = process.env.NODE_ENV === 'production';
-  const timeoutDuration = isProduction ? 90000 : 15000; // Production: 90s, Development: 15s
-  const portsToTry = [587, 465, 25];
-  let transporter;
-
+// Send email function
+const sendEmail = async (to, subject, text, html = null) => {
   try {
-    const currentPort = portsToTry[portAttempt] || 587;
-    transporter = createTransporter(currentPort);
+    const transporter = createTransporter();
 
-    // Skip verification in production (faster)
-    if (!isProduction) {
-      try {
-        await transporter.verify();
-        console.log(`Email server connection verified on port ${currentPort}`);
-      } catch (verifyError) {
-        console.warn(`Email server verification failed on port ${currentPort}, but continuing:`, verifyError.message);
-      }
-    }
+    // Use SMTP_EMAIL as from address to avoid spam (must match authenticated email)
+    const fromEmail = process.env.EMAIL_FROM || process.env.SMTP_EMAIL;
+    const fromName = process.env.EMAIL_FROM_NAME || 'Forpink';
 
     const mailOptions = {
-      from: process.env.EMAIL_FROM || process.env.SMTP_EMAIL || 'noreply@forpink.com',
+      from: `"${fromName}" <${fromEmail}>`, // Proper format: "Name" <email@domain.com>
       to: to,
       subject: subject,
-      text: text
+      text: text,
+      // Add proper headers to avoid spam
+      headers: {
+        'X-Priority': '1',
+        'X-MSMail-Priority': 'High',
+        'Importance': 'high',
+        'List-Unsubscribe': `<mailto:${fromEmail}?subject=unsubscribe>`,
+        'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click'
+      },
+      // Add reply-to
+      replyTo: fromEmail
     };
 
     // If HTML content is provided
@@ -122,13 +49,7 @@ const sendEmail = async (to, subject, text, html = null, retryCount = 0, portAtt
       mailOptions.html = html;
     }
 
-    // Send email with timeout
-    const result = await Promise.race([
-      transporter.sendMail(mailOptions),
-      new Promise((_, reject) => 
-        setTimeout(() => reject(new Error(`Email sending timeout after ${timeoutDuration / 1000} seconds on port ${currentPort}`)), timeoutDuration)
-      )
-    ]);
+    const result = await transporter.sendMail(mailOptions);
 
     return {
       success: true,
@@ -136,47 +57,25 @@ const sendEmail = async (to, subject, text, html = null, retryCount = 0, portAtt
     };
 
   } catch (error) {
-    console.error(`Email sending error (port ${portsToTry[portAttempt] || 587}, attempt ${retryCount + 1}/${MAX_RETRIES + 1}):`, error.message);
-    
-    // Close transporter connection on error
-    if (transporter) {
-      try {
-        transporter.close();
-      } catch (closeError) {
-        // Ignore close errors
-      }
-    }
-    
-    // Try different port if current port fails (only for connection errors)
-    if (isProduction && portAttempt < MAX_PORT_ATTEMPTS - 1 && (error.code === 'ETIMEDOUT' || error.message.includes('timeout') || error.message.includes('Connection') || error.code === 'ECONNREFUSED')) {
-      const nextPort = portsToTry[portAttempt + 1];
-      console.log(`Port ${portsToTry[portAttempt] || 587} failed, trying port ${nextPort}...`);
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      return sendEmail(to, subject, text, html, 0, portAttempt + 1);
-    }
-    
-    // Retry logic for same port (if all ports tried and still error)
-    if (isProduction && retryCount < MAX_RETRIES && portAttempt >= MAX_PORT_ATTEMPTS - 1) {
-      console.log(`Retrying email send on port ${portsToTry[portAttempt] || 587} (attempt ${retryCount + 2}/${MAX_RETRIES + 1})...`);
-      await new Promise(resolve => setTimeout(resolve, 2000 * (retryCount + 1)));
-      return sendEmail(to, subject, text, html, retryCount + 1, portAttempt);
-    }
-    
+    console.error('Email sending error:', error.message);
     throw new Error('Failed to send email: ' + error.message);
   }
 };
 
 // Send OTP email specifically
 const sendOTPEmail = async (email, otp) => {
-  const subject = 'Your Forpink Register OTP';
-  const text = `Your Forpink register OTP is: ${otp}. This code will expire in 5 minutes. Please do not share this code with anyone.`;
+  // Better subject line to avoid spam filters
+  const subject = 'Your Forpink Verification Code';
+  const text = `Your Forpink verification code is: ${otp}. This code will expire in 5 minutes. Please do not share this code with anyone.`;
 
   const html = `
     <!DOCTYPE html>
-    <html>
+    <html lang="en">
     <head>
       <meta charset="UTF-8">
       <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+      <meta name="format-detection" content="telephone=no">
     </head>
     <body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f8f9fa;">
       <table role="presentation" style="width: 100%; border-collapse: collapse; background-color: #f8f9fa; padding: 20px 0;">
@@ -239,7 +138,291 @@ const sendOTPEmail = async (email, otp) => {
   return await sendEmail(email, subject, text, html);
 };
 
+// Send order confirmation email
+const sendOrderConfirmationEmail = async (order, user) => {
+  try {
+    // Format order date
+    const orderDate = new Date(order.createdAt).toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+
+    // Calculate subtotal from items
+    const subtotal = order.items.reduce((sum, item) => sum + (item.subtotal || item.price * item.quantity), 0);
+    
+    // Calculate total discounts
+    const totalDiscounts = (order.discount || 0) + (order.couponDiscount || 0) + (order.upsellDiscount || 0) + (order.loyaltyDiscount || 0);
+    
+    // Build items HTML (without images)
+    const itemsHtml = order.items.map((item, index) => {
+      const variantInfo = item.variant ? 
+        `<p style="margin: 4px 0 0; color: #6b7280; font-size: 13px;">
+          ${item.variant.size ? `Size: ${item.variant.size}` : ''}
+          ${item.variant.color ? `${item.variant.size ? ', ' : ''}Color: ${item.variant.color}` : ''}
+        </p>` : '';
+      
+      return `
+        <tr>
+          <td style="padding: 12px; border-bottom: 1px solid #e5e7eb;">
+            <div>
+              <p style="margin: 0 0 4px; font-weight: 600; color: #1f2937; font-size: 14px;">${item.name || 'Product'}</p>
+              ${variantInfo}
+              <p style="margin: 4px 0 0; color: #6b7280; font-size: 13px;">Quantity: ${item.quantity}</p>
+            </div>
+          </td>
+          <td style="padding: 12px; text-align: right; border-bottom: 1px solid #e5e7eb;">
+            <p style="margin: 0; font-weight: 600; color: #1f2937; font-size: 14px;">৳${(item.subtotal || item.price * item.quantity).toFixed(2)}</p>
+          </td>
+        </tr>
+      `;
+    }).join('');
+
+    // Payment method display
+    const paymentMethodDisplay = {
+      'cod': 'Cash on Delivery (COD)',
+      'card': 'Credit/Debit Card',
+      'bkash': 'bKash',
+      'nagad': 'Nagad',
+      'rocket': 'Rocket',
+      'bank': 'Bank Transfer'
+    }[order.paymentMethod] || order.paymentMethod || 'N/A';
+
+    // Status display
+    const statusDisplay = {
+      'pending': 'Pending',
+      'confirmed': 'Confirmed',
+      'processing': 'Processing',
+      'shipped': 'Shipped',
+      'delivered': 'Delivered',
+      'cancelled': 'Cancelled',
+      'returned': 'Returned'
+    }[order.status] || order.status;
+
+    // Build shipping address
+    const shippingAddress = order.shippingAddress ? `
+      <p style="margin: 0 0 4px; color: #4b5563; font-size: 14px; line-height: 1.6;">
+        ${order.shippingAddress.street || ''}<br>
+        ${[order.shippingAddress.area, order.shippingAddress.upazila, order.shippingAddress.district, order.shippingAddress.division].filter(Boolean).join(', ')}<br>
+        ${order.shippingAddress.postalCode ? `Postal Code: ${order.shippingAddress.postalCode}` : ''}
+      </p>
+    ` : '<p style="margin: 0; color: #6b7280; font-size: 14px;">N/A</p>';
+
+    // Frontend URL for order details (using orderId, not _id)
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+    const orderDetailsUrl = `${frontendUrl}/dashboard/my-orders/${order.orderId}`;
+
+    // Map order status to schema.org OrderStatus
+    const getOrderStatusSchema = (status) => {
+      const statusMap = {
+        'pending': 'http://schema.org/OrderPaymentDue',
+        'confirmed': 'http://schema.org/OrderProcessing',
+        'processing': 'http://schema.org/OrderProcessing',
+        'shipped': 'http://schema.org/OrderInTransit',
+        'delivered': 'http://schema.org/OrderDelivered',
+        'cancelled': 'http://schema.org/OrderCancelled',
+        'returned': 'http://schema.org/OrderReturned'
+      };
+      return statusMap[status] || 'http://schema.org/OrderProcessing';
+    };
+
+    // Build acceptedOffer array for structured data
+    const acceptedOffers = order.items.map(item => {
+      // Build variant description
+      let variantDesc = "";
+      if (item.variant) {
+        const parts = [];
+        if (item.variant.size) parts.push(`Size: ${item.variant.size}`);
+        if (item.variant.color) parts.push(`Color: ${item.variant.color}`);
+        variantDesc = parts.join(", ");
+      }
+      
+      return {
+        "@type": "Offer",
+        "itemOffered": {
+          "@type": "Product",
+          "name": item.name || "Product",
+          "image": item.image || "",
+          "description": variantDesc || "Product"
+        },
+        "price": (item.subtotal || item.price * item.quantity).toFixed(2),
+        "priceCurrency": "BDT",
+        "quantity": item.quantity
+      };
+    });
+
+    // Build structured data (JSON-LD) for Gmail Purchase category
+    const structuredData = {
+      "@context": "http://schema.org",
+      "@type": "Order",
+      "merchant": {
+        "@type": "Organization",
+        "name": "Forpink",
+        "url": frontendUrl
+      },
+      "orderNumber": order.orderId,
+      "priceCurrency": "BDT",
+      "price": order.total.toFixed(2),
+      "acceptedOffer": acceptedOffers,
+      "url": orderDetailsUrl,
+      "orderStatus": getOrderStatusSchema(order.status),
+      "orderDate": new Date(order.createdAt).toISOString(),
+      "customer": {
+        "@type": "Person",
+        "name": user.name || "Customer",
+        "email": user.email
+      }
+    };
+
+    const subject = `Order Confirmation - #${order.orderId}`;
+    const text = `Thank you for your order! Your order #${order.orderId} has been confirmed. Total: ৳${order.total.toFixed(2)}. View details: ${orderDetailsUrl}`;
+
+    const html = `
+      <!DOCTYPE html>
+      <html lang="en">
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+        <meta name="format-detection" content="telephone=no">
+        <script type="application/ld+json">
+        ${JSON.stringify(structuredData, null, 2)}
+        </script>
+      </head>
+      <body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f8f9fa;">
+        <table role="presentation" style="width: 100%; border-collapse: collapse; background-color: #f8f9fa; padding: 20px 0;">
+          <tr>
+            <td align="center">
+              <table role="presentation" style="width: 600px; border-collapse: collapse; background-color: #ffffff; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); overflow: hidden;">
+                <!-- Header -->
+                <tr>
+                  <td style="background: linear-gradient(135deg, #ec4899 0%, #be185d 100%); padding: 40px 40px 30px; text-align: center;">
+                    <h1 style="margin: 0; color: #ffffff; font-size: 28px; font-weight: 600; letter-spacing: -0.5px;">Forpink</h1>
+                    <p style="margin: 8px 0 0; color: #fce7f3; font-size: 14px; font-weight: 400;">Your trusted shopping partner</p>
+                  </td>
+                </tr>
+                
+                <!-- Content -->
+                <tr>
+                  <td style="padding: 40px;">
+                    <h2 style="margin: 0 0 20px; color: #1f2937; font-size: 22px; font-weight: 600;">Order Confirmation</h2>
+                    <p style="margin: 0 0 24px; color: #4b5563; font-size: 15px; line-height: 1.6;">
+                      Thank you for your order, ${user.name || 'Valued Customer'}! Your order has been confirmed and we're preparing it for shipment.
+                    </p>
+                    
+                    <!-- Order Info Box -->
+                    <div style="background: linear-gradient(135deg, #fdf2f8 0%, #fce7f3 100%); border: 2px solid #fbcfe8; border-radius: 12px; padding: 24px; margin: 24px 0;">
+                      <p style="margin: 0 0 8px; color: #1f2937; font-size: 14px; line-height: 1.6;">
+                        <span style="font-weight: 600; color: #9f1239;">Order Number:</span> 
+                        <span style="color: #be185d; font-weight: 700; font-family: 'Courier New', monospace;">#${order.orderId}</span>
+                      </p>
+                      <p style="margin: 0 0 8px; color: #1f2937; font-size: 14px; line-height: 1.6;">
+                        <span style="font-weight: 600; color: #9f1239;">Order Date:</span> 
+                        <span style="color: #be185d; font-weight: 600;">${orderDate}</span>
+                      </p>
+                      <p style="margin: 0 0 8px; color: #1f2937; font-size: 14px; line-height: 1.6;">
+                        <span style="font-weight: 600; color: #9f1239;">Status:</span> 
+                        <span style="color: #be185d; font-weight: 600;">${statusDisplay}</span>
+                      </p>
+                      <p style="margin: 0; color: #1f2937; font-size: 14px; line-height: 1.6;">
+                        <span style="font-weight: 600; color: #9f1239;">Payment Method:</span> 
+                        <span style="color: #be185d; font-weight: 600;">${paymentMethodDisplay}</span>
+                      </p>
+                    </div>
+
+                    <!-- Shipping Address -->
+                    <div style="background-color: #f9fafb; border-radius: 8px; padding: 20px; margin: 24px 0;">
+                      <h3 style="margin: 0 0 12px; color: #1f2937; font-size: 16px; font-weight: 600;">Shipping Address</h3>
+                      ${shippingAddress}
+                    </div>
+
+                    <!-- Order Items -->
+                    <div style="margin: 24px 0;">
+                      <h3 style="margin: 0 0 16px; color: #1f2937; font-size: 16px; font-weight: 600;">Order Items</h3>
+                      <table role="presentation" style="width: 100%; border-collapse: collapse; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden;">
+                        <thead>
+                          <tr style="background-color: #f9fafb;">
+                            <th style="padding: 12px; text-align: left; font-weight: 600; color: #374151; font-size: 13px; border-bottom: 1px solid #e5e7eb;">Item</th>
+                            <th style="padding: 12px; text-align: right; font-weight: 600; color: #374151; font-size: 13px; border-bottom: 1px solid #e5e7eb;">Price</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          ${itemsHtml}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <!-- Order Summary -->
+                    <div style="background-color: #f9fafb; border-radius: 8px; padding: 20px; margin: 24px 0;">
+                      <h3 style="margin: 0 0 16px; color: #1f2937; font-size: 16px; font-weight: 600;">Order Summary</h3>
+                      <table role="presentation" style="width: 100%; border-collapse: collapse;">
+                        <tr>
+                          <td style="padding: 8px 0; color: #6b7280; font-size: 14px;">Subtotal:</td>
+                          <td style="padding: 8px 0; text-align: right; color: #1f2937; font-size: 14px; font-weight: 600;">৳${subtotal.toFixed(2)}</td>
+                        </tr>
+                        ${order.shippingCost > 0 ? `
+                        <tr>
+                          <td style="padding: 8px 0; color: #6b7280; font-size: 14px;">Shipping:</td>
+                          <td style="padding: 8px 0; text-align: right; color: #1f2937; font-size: 14px; font-weight: 600;">৳${order.shippingCost.toFixed(2)}</td>
+                        </tr>
+                        ` : ''}
+                        ${totalDiscounts > 0 ? `
+                        <tr>
+                          <td style="padding: 8px 0; color: #6b7280; font-size: 14px;">Discounts:</td>
+                          <td style="padding: 8px 0; text-align: right; color: #10b981; font-size: 14px; font-weight: 600;">-৳${totalDiscounts.toFixed(2)}</td>
+                        </tr>
+                        ` : ''}
+                        <tr style="border-top: 2px solid #e5e7eb;">
+                          <td style="padding: 12px 0 0; color: #1f2937; font-size: 16px; font-weight: 700;">Total:</td>
+                          <td style="padding: 12px 0 0; text-align: right; color: #be185d; font-size: 18px; font-weight: 700;">৳${order.total.toFixed(2)}</td>
+                        </tr>
+                      </table>
+                    </div>
+
+                    <!-- View Order Button -->
+                    <div style="text-align: center; margin: 32px 0 0;">
+                      <a href="${orderDetailsUrl}" style="display: inline-block; background: linear-gradient(135deg, #ec4899 0%, #be185d 100%); color: #ffffff; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-weight: 600; font-size: 15px;">View Order Details</a>
+                    </div>
+
+                    ${order.orderNotes ? `
+                    <div style="background-color: #fef3c7; border-left: 4px solid #f59e0b; padding: 16px; margin: 24px 0; border-radius: 4px;">
+                      <p style="margin: 0 0 8px; color: #92400e; font-size: 13px; font-weight: 600;">Order Notes:</p>
+                      <p style="margin: 0; color: #78350f; font-size: 14px; line-height: 1.6;">${order.orderNotes}</p>
+                    </div>
+                    ` : ''}
+                  </td>
+                </tr>
+                
+                <!-- Footer -->
+                <tr>
+                  <td style="background-color: #f9fafb; padding: 30px 40px; text-align: center; border-top: 1px solid #e5e7eb;">
+                    <p style="margin: 0 0 8px; color: #6b7280; font-size: 13px;">
+                      If you have any questions about your order, please contact our support team.
+                    </p>
+                    <p style="margin: 0; color: #9ca3af; font-size: 12px;">
+                      © ${new Date().getFullYear()} Forpink. All rights reserved.
+                    </p>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+        </table>
+      </body>
+      </html>
+    `;
+
+    return await sendEmail(user.email, subject, text, html);
+  } catch (error) {
+    console.error('Error sending order confirmation email:', error);
+    throw error;
+  }
+};
+
 module.exports = {
   sendEmail,
-  sendOTPEmail
+  sendOTPEmail,
+  sendOrderConfirmationEmail
 };

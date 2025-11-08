@@ -18,4 +18,17 @@ router.get('/stock-history/:productId', inventoryController.getStockHistory);
 router.get('/stock-summary/:productId', inventoryController.getStockSummary);
 router.get('/analytics', inventoryController.getStockAnalytics);
 
+// Purchase management
+router.post('/purchases', inventoryController.createPurchase);
+router.get('/purchases', inventoryController.getPurchases);
+router.get('/purchases/:id', inventoryController.getPurchaseById);
+
+// Stock adjustment management
+router.post('/stock-adjustments', inventoryController.createStockAdjustment);
+router.get('/stock-adjustments', inventoryController.getStockAdjustments);
+router.get('/stock-adjustments/:id', inventoryController.getStockAdjustmentById);
+
+// Product stock history
+router.get('/product-stock-history/:productId', inventoryController.getProductStockHistory);
+
 module.exports = router;

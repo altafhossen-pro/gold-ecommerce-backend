@@ -1,9 +1,16 @@
 const { Order } = require('./order.model');
 const { Product } = require('../product/product.model');
 const { User } = require('../user/user.model');
+const { Loyalty } = require('../loyalty/loyalty.model');
+const { Coupon } = require('../coupon/coupon.model');
+const Settings = require('../settings/settings.model');
+const { Division, District, Upazila, DhakaCity } = require('../address/address.model');
+const { StockTracking } = require('../inventory/stockTracking.model');
 const { earnCoinsFromOrder, redeemPoints } = require('../loyalty/loyalty.controller');
 const { incrementCouponUsage } = require('../coupon/coupon.controller');
 const sendResponse = require('../../utils/sendResponse');
+const { sendOrderConfirmationEmail } = require('../../utils/email');
+const { sendCustomSMS } = require('../../utils/smsService');
 
 exports.createOrder = async (req, res) => {
   try {
@@ -17,7 +24,7 @@ exports.createOrder = async (req, res) => {
 
     // Validate address IDs if provided
     if (orderData.shippingAddress) {
-      const { Division, District, Upazila, DhakaCity } = require('../address/address.model');
+      
 
       // Validate division ID if provided
       if (orderData.shippingAddress.divisionId) {
@@ -74,8 +81,6 @@ exports.createOrder = async (req, res) => {
 
     // Validate billing address IDs if provided
     if (orderData.billingAddress) {
-      const { Division, District, Upazila, DhakaCity } = require('../address/address.model');
-
       // Validate division ID if provided
       if (orderData.billingAddress.divisionId) {
         const division = await Division.findOne({ id: orderData.billingAddress.divisionId });
@@ -151,7 +156,6 @@ exports.createOrder = async (req, res) => {
     // Handle coupon usage increment
     if (orderData.coupon) {
       try {
-        const { Coupon } = require('../coupon/coupon.model');
         await Coupon.findOneAndUpdate(
           { code: orderData.coupon },
           { $inc: { usedCount: 1 } }
@@ -164,7 +168,7 @@ exports.createOrder = async (req, res) => {
     // Handle loyalty points redemption after order creation
     if (orderData.loyaltyPointsUsed && orderData.loyaltyPointsUsed > 0) {
       try {
-        const { Loyalty } = require('../loyalty/loyalty.model');
+        
         const loyalty = await Loyalty.findOne({ user: req.user._id });
 
         if (loyalty) {
@@ -190,8 +194,20 @@ exports.createOrder = async (req, res) => {
     // Update product stock only for confirmed orders (loyalty points orders)
     if (order.status === 'confirmed' && order.items && order.items.length > 0) {
       for (const item of order.items) {
+        let previousStock = 0;
+        let newStock = 0;
+        
         // Update variant stock if variant exists
         if (item.variant && item.variant.sku) {
+          // Get product to find variant and previous stock
+          const product = await Product.findById(item.product);
+          if (product) {
+            const variant = product.variants.find(v => v.sku === item.variant.sku);
+            if (variant) {
+              previousStock = variant.stockQuantity || 0;
+            }
+          }
+          
           // Update variant stock
           const result = await Product.findOneAndUpdate(
             {
@@ -205,23 +221,91 @@ exports.createOrder = async (req, res) => {
           );
 
           if (result) {
+            const updatedVariant = result.variants.find(v => v.sku === item.variant.sku);
+            newStock = updatedVariant ? updatedVariant.stockQuantity : 0;
+            
             // Update totalStock
             const updatedTotalStock = result.variants.reduce((total, variant) => total + (variant.stockQuantity || 0), 0);
             await Product.findByIdAndUpdate(item.product, { totalStock: updatedTotalStock });
+            
+            // Create stock tracking record for sold items
+            const stockTracking = new StockTracking({
+              product: item.product,
+              variant: {
+                sku: item.variant.sku,
+                attributes: item.variant.attributes
+              },
+              type: 'remove',
+              quantity: -item.quantity,
+              previousStock,
+              newStock,
+              reason: `Order: ${order.orderId} - Confirmed`,
+              reference: order.orderId,
+              performedBy: order.user || null,
+              notes: `Order confirmed - stock removed`
+            });
+            await stockTracking.save();
           }
         } else {
+          // Get product for previous stock
+          const product = await Product.findById(item.product);
+          if (product) {
+            previousStock = product.totalStock || 0;
+          }
+          
           // Update main product stock
-          await Product.findByIdAndUpdate(
+          const result = await Product.findByIdAndUpdate(
             item.product,
             { $inc: { totalStock: -item.quantity } },
             { new: true }
           );
+          
+          if (result) {
+            newStock = result.totalStock || 0;
+            
+            // Create stock tracking record for sold items
+            const stockTracking = new StockTracking({
+              product: item.product,
+              variant: null,
+              type: 'remove',
+              quantity: -item.quantity,
+              previousStock,
+              newStock,
+              reason: `Order: ${order.orderId} - Confirmed`,
+              reference: order.orderId,
+              performedBy: order.user || null,
+              notes: `Order confirmed - stock removed`
+            });
+            await stockTracking.save();
+          }
         }
       }
     }
 
     // No totalSold update on order creation
     // totalSold will be updated when order status becomes 'delivered'
+
+    // Send order confirmation email to logged-in users (if enabled in settings)
+    if (order.user && !order.isGuestOrder) {
+      try {
+        // Check if email sending is enabled
+        const settings = await Settings.findOne();
+        if (settings && settings.isSendOrderConfirmationEmail !== false) {
+          // Populate user data for email
+          const populatedOrder = await Order.findById(order._id).populate('user', 'name email');
+          if (populatedOrder && populatedOrder.user && populatedOrder.user.email) {
+            // Send email asynchronously (don't wait for it to complete)
+            sendOrderConfirmationEmail(populatedOrder, populatedOrder.user).catch(emailError => {
+              console.error('Failed to send order confirmation email:', emailError);
+              // Don't fail the order creation if email fails
+            });
+          }
+        }
+      } catch (emailError) {
+        console.error('Error preparing order confirmation email:', emailError);
+        // Don't fail the order creation if email fails
+      }
+    }
 
     return sendResponse({
       res,
@@ -327,28 +411,51 @@ exports.getAdminOrders = async (req, res) => {
       limit = 10,
       status,
       paymentStatus,
-      orderId,
-      email,
-      phone,
+      search, // Unified search for orderId, email, phone
+      orderId, // Keep for backward compatibility
+      email, // Keep for backward compatibility
+      phone, // Keep for backward compatibility
       includeDeleted = false // Optional: include deleted orders
     } = req.query;
 
+    // Use unified search if provided, otherwise fall back to individual filters
+    const searchTerm = search || orderId || email || phone;
+
     // Email and Phone filtering - need to find matching users first
     let matchingUserIds = [];
-    if (email || phone) {
+    if (searchTerm) {
+      // If unified search, try to detect if it's email or phone, otherwise search both
+      // If individual filters, use them
+      const emailSearch = search ? (search.includes('@') ? search : null) : email;
+      const phoneSearch = search ? search : phone;
+      
       const userQuery = {};
-      if (email) {
-        userQuery.email = { $regex: email, $options: 'i' };
+      
+      // Email search (only if contains @ or if email parameter provided)
+      if (emailSearch) {
+        userQuery.email = { $regex: emailSearch, $options: 'i' };
       }
-      if (phone) {
-        userQuery.$or = userQuery.$or || [];
-        userQuery.$or.push({ phone: { $regex: phone, $options: 'i' } });
-        userQuery.$or.push({ phoneNumber: { $regex: phone, $options: 'i' } });
+      
+      // Phone search (always try phone search for unified search, or if phone parameter provided)
+      // But don't add phone search if we're searching for email
+      if (phoneSearch && !emailSearch) {
+        if (userQuery.$or) {
+          userQuery.$or.push({ phone: { $regex: phoneSearch, $options: 'i' } });
+          userQuery.$or.push({ phoneNumber: { $regex: phoneSearch, $options: 'i' } });
+        } else {
+          userQuery.$or = [
+            { phone: { $regex: phoneSearch, $options: 'i' } },
+            { phoneNumber: { $regex: phoneSearch, $options: 'i' } }
+          ];
+        }
       }
 
       if (Object.keys(userQuery).length > 0) {
         const users = await User.find(userQuery).select('_id');
         matchingUserIds = users.map(u => u._id);
+        if (searchTerm) {
+          console.log('Matching user IDs found:', matchingUserIds.length);
+        }
       }
     }
 
@@ -356,9 +463,60 @@ exports.getAdminOrders = async (req, res) => {
     const filterConditions = [];
     const orConditions = [];
 
-    // Order ID filter
-    if (orderId) {
-      filterConditions.push({ orderId: { $regex: orderId, $options: 'i' } });
+    // Unified search or Order ID filter
+    if (searchTerm) {
+      const searchConditions = [];
+
+      // Order ID search (exact match or partial match)
+      searchConditions.push({ orderId: { $regex: searchTerm, $options: 'i' } });
+
+      // If we found matching users by email/phone, include their orders
+      if (matchingUserIds.length > 0) {
+        searchConditions.push({ user: { $in: matchingUserIds } });
+      }
+
+      // Phone search in order fields (always search phone fields for unified search)
+      searchConditions.push({ 'manualOrderInfo.phone': { $regex: searchTerm, $options: 'i' } });
+      searchConditions.push({ 'shippingAddress.phone': { $regex: searchTerm, $options: 'i' } });
+      searchConditions.push({ 'guestInfo.phone': { $regex: searchTerm, $options: 'i' } });
+
+      // Email search in guestInfo (always search email fields for unified search)
+      searchConditions.push({ 'guestInfo.email': { $regex: searchTerm, $options: 'i' } });
+
+      if (searchConditions.length > 0) {
+        orConditions.push({ $or: searchConditions });
+      }
+    } else {
+      // Backward compatibility: individual filters
+      if (orderId) {
+        filterConditions.push({ orderId: { $regex: orderId, $options: 'i' } });
+      }
+
+      // Email/Phone search conditions - combine all search options
+      if (email || phone || matchingUserIds.length > 0) {
+        const searchConditions = [];
+
+        // If we found matching users by email/phone, include their orders
+        if (matchingUserIds.length > 0) {
+          searchConditions.push({ user: { $in: matchingUserIds } });
+        }
+
+        // Phone search in order fields
+        if (phone) {
+          searchConditions.push({ 'manualOrderInfo.phone': { $regex: phone, $options: 'i' } });
+          searchConditions.push({ 'shippingAddress.phone': { $regex: phone, $options: 'i' } });
+          searchConditions.push({ 'guestInfo.phone': { $regex: phone, $options: 'i' } });
+        }
+
+        // Email search in guestInfo
+        if (email) {
+          searchConditions.push({ 'guestInfo.email': { $regex: email, $options: 'i' } });
+        }
+
+        if (searchConditions.length > 0) {
+          orConditions.push({ $or: searchConditions });
+        }
+      }
     }
 
     // Status filter
@@ -369,32 +527,6 @@ exports.getAdminOrders = async (req, res) => {
     // Payment status filter
     if (paymentStatus && paymentStatus !== 'all') {
       filterConditions.push({ paymentStatus });
-    }
-
-    // Email/Phone search conditions - combine all search options
-    if (email || phone || matchingUserIds.length > 0) {
-      const searchConditions = [];
-
-      // If we found matching users by email/phone, include their orders
-      if (matchingUserIds.length > 0) {
-        searchConditions.push({ user: { $in: matchingUserIds } });
-      }
-
-      // Phone search in order fields
-      if (phone) {
-        searchConditions.push({ 'manualOrderInfo.phone': { $regex: phone, $options: 'i' } });
-        searchConditions.push({ 'shippingAddress.phone': { $regex: phone, $options: 'i' } });
-        searchConditions.push({ 'guestInfo.phone': { $regex: phone, $options: 'i' } });
-      }
-
-      // Email search in guestInfo
-      if (email) {
-        searchConditions.push({ 'guestInfo.email': { $regex: email, $options: 'i' } });
-      }
-
-      if (searchConditions.length > 0) {
-        orConditions.push({ $or: searchConditions });
-      }
     }
 
     // Deleted filter
@@ -419,11 +551,21 @@ exports.getAdminOrders = async (req, res) => {
       finalFilter = { $and: finalConditions };
     }
 
+    // Debug logging
+    if (searchTerm) {
+      console.log('Search term:', searchTerm);
+      console.log('Final filter:', JSON.stringify(finalFilter, null, 2));
+    }
+
     // Calculate skip value for pagination
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
     // Get total count for pagination (before filtering by user.email which needs populate)
     const total = await Order.countDocuments(finalFilter);
+    
+    if (searchTerm) {
+      console.log('Total orders found:', total);
+    }
 
     // Get orders with pagination
     let orders = await Order.find(finalFilter)
@@ -434,20 +576,66 @@ exports.getAdminOrders = async (req, res) => {
       .skip(skip)
       .limit(parseInt(limit));
 
-    // Additional filter by user.email if email was provided (for exact match after populate)
-    if (email && orders.length > 0) {
-      const emailLower = email.toLowerCase();
-      orders = orders.filter(order => {
+    if (searchTerm) {
+      console.log('Orders found before email/phone filtering:', orders.length);
+      if (orders.length > 0) {
+        console.log('First order orderId:', orders[0].orderId);
+        console.log('First order user email:', orders[0].user?.email);
+        console.log('First order user phone:', orders[0].user?.phone);
+      }
+    }
+
+    // Additional filter by user.email if search term was provided (for exact match after populate)
+    // Only filter if search term looks like email (contains @) or if email parameter was provided
+    const emailSearchTerm = search?.includes('@') ? search : email;
+    if (emailSearchTerm && orders.length > 0) {
+      const emailLower = emailSearchTerm.toLowerCase();
+      const filteredByEmail = orders.filter(order => {
         const userEmail = order.user?.email?.toLowerCase() || '';
         const guestEmail = order.guestInfo?.email?.toLowerCase() || '';
-        return userEmail.includes(emailLower) || guestEmail.includes(emailLower);
+        const manualEmail = order.manualOrderInfo?.email?.toLowerCase() || '';
+        const matches = userEmail.includes(emailLower) || guestEmail.includes(emailLower) || manualEmail.includes(emailLower);
+        if (searchTerm && !matches) {
+          console.log('Order not matching email:', order.orderId, 'userEmail:', userEmail, 'guestEmail:', guestEmail);
+        }
+        return matches;
       });
+      // Always use filtered results if email search was provided (even if empty, to show no results)
+      orders = filteredByEmail;
+      if (searchTerm) {
+        console.log('Filtered by email, remaining orders:', orders.length);
+      }
+    }
+    
+    // Additional filter by user.phone if search term was provided (for exact match after populate)
+    // Only filter if search term doesn't look like email and phone search is needed
+    // Skip if we already filtered by email
+    const phoneSearchTerm = (search && !search.includes('@')) ? search : phone;
+    if (phoneSearchTerm && !emailSearchTerm && orders.length > 0) {
+      const phoneLower = phoneSearchTerm.toLowerCase();
+      const filteredByPhone = orders.filter(order => {
+        const userPhone = order.user?.phone?.toLowerCase() || '';
+        const manualPhone = order.manualOrderInfo?.phone?.toLowerCase() || '';
+        const guestPhone = order.guestInfo?.phone?.toLowerCase() || '';
+        return userPhone.includes(phoneLower) || manualPhone.includes(phoneLower) || guestPhone.includes(phoneLower);
+      });
+      // Only replace orders if we found matches, otherwise keep original (might be orderId match)
+      if (filteredByPhone.length > 0) {
+        orders = filteredByPhone;
+        if (searchTerm) {
+          console.log('Filtered by phone, remaining orders:', orders.length);
+        }
+      }
+    }
+
+    if (searchTerm) {
+      console.log('Final orders count:', orders.length);
     }
 
     // Note: If we filtered after populate, the total count might not match exactly
     // For better accuracy, we could recalculate, but for now using the original total
     // Calculate pagination info based on filtered results
-    const actualTotal = email && orders.length < parseInt(limit)
+    const actualTotal = emailSearchTerm && orders.length < parseInt(limit)
       ? (parseInt(page) - 1) * parseInt(limit) + orders.length
       : total; // Approximation when post-filtering is done
 
@@ -626,6 +814,12 @@ exports.updateOrder = async (req, res) => {
           message: `Invalid status transition from ${currentStatus} to ${newStatus}`,
         });
       }
+
+      // Update status timestamps
+      updates.statusTimestamps = {
+        ...oldOrder.statusTimestamps,
+        [newStatus]: new Date()
+      };
     }
 
     // Handle partial return quantities if provided
@@ -669,12 +863,19 @@ exports.updateOrder = async (req, res) => {
     if (updates.status === 'confirmed' && oldOrder.status !== 'confirmed') {
       if (order.items && order.items.length > 0) {
         for (const item of order.items) {
+          let previousStock = 0;
+          let newStock = 0;
 
           // Update variant stock if variant exists
           if (item.variant && item.variant.sku) {
-
             // First, get the current product to check variant stock
             const currentProduct = await Product.findById(item.product);
+            if (currentProduct) {
+              const variant = currentProduct.variants.find(v => v.sku === item.variant.sku);
+              if (variant) {
+                previousStock = variant.stockQuantity || 0;
+              }
+            }
 
             // Find variant by SKU and update stock
             const result = await Product.findOneAndUpdate(
@@ -690,6 +891,9 @@ exports.updateOrder = async (req, res) => {
 
             // Manually update totalStock after variant update
             if (result) {
+              const updatedVariant = result.variants.find(v => v.sku === item.variant.sku);
+              newStock = updatedVariant ? updatedVariant.stockQuantity : 0;
+              
               const updatedTotalStock = result.variants.reduce((total, variant) => total + (variant.stockQuantity || 0), 0);
 
               // Update totalStock and save to trigger any middleware
@@ -697,21 +901,56 @@ exports.updateOrder = async (req, res) => {
               product.totalStock = updatedTotalStock;
               await product.save();
 
-
-              // Verify the update by fetching the product again
-              const verifyProduct = await Product.findById(item.product);
-            }
-
-            if (result) {
-            } else {
+              // Create stock tracking record for sold items
+              const stockTracking = new StockTracking({
+                product: item.product,
+                variant: {
+                  sku: item.variant.sku,
+                  attributes: item.variant.attributes
+                },
+                type: 'remove',
+                quantity: -item.quantity,
+                previousStock,
+                newStock,
+                reason: `Order: ${order.orderId} - Confirmed`,
+                reference: order.orderId,
+                performedBy: adminId || null,
+                notes: `Order confirmed - stock removed`
+              });
+              await stockTracking.save();
             }
           } else {
+            // Get product for previous stock
+            const product = await Product.findById(item.product);
+            if (product) {
+              previousStock = product.totalStock || 0;
+            }
+            
             // Update main product stock
             const result = await Product.findByIdAndUpdate(
               item.product,
               { $inc: { totalStock: -item.quantity } },
               { new: true }
             );
+            
+            if (result) {
+              newStock = result.totalStock || 0;
+              
+              // Create stock tracking record for sold items
+              const stockTracking = new StockTracking({
+                product: item.product,
+                variant: null,
+                type: 'remove',
+                quantity: -item.quantity,
+                previousStock,
+                newStock,
+                reason: `Order: ${order.orderId} - Confirmed`,
+                reference: order.orderId,
+                performedBy: adminId || null,
+                notes: `Order confirmed - stock removed`
+              });
+              await stockTracking.save();
+            }
           }
         }
       }
@@ -728,8 +967,20 @@ exports.updateOrder = async (req, res) => {
             const item = order.items[itemIndex];
 
             if (returnQuantity > 0) {
+              let previousStock = 0;
+              let newStock = 0;
+              
               // Update variant stock if variant exists
               if (item.variant && item.variant.sku) {
+                // Get product to find variant and previous stock
+                const product = await Product.findById(item.product);
+                if (product) {
+                  const variant = product.variants.find(v => v.sku === item.variant.sku);
+                  if (variant) {
+                    previousStock = variant.stockQuantity || 0;
+                  }
+                }
+                
                 // Find variant by SKU and add stock back
                 const result = await Product.findOneAndUpdate(
                   {
@@ -744,28 +995,86 @@ exports.updateOrder = async (req, res) => {
 
                 // Manually update totalStock after variant update
                 if (result) {
+                  const updatedVariant = result.variants.find(v => v.sku === item.variant.sku);
+                  newStock = updatedVariant ? updatedVariant.stockQuantity : 0;
+                  
                   const updatedTotalStock = result.variants.reduce((total, variant) => total + (variant.stockQuantity || 0), 0);
 
                   // Update totalStock and save to trigger any middleware
                   const product = await Product.findById(item.product);
                   product.totalStock = updatedTotalStock;
                   await product.save();
+                  
+                  // Create stock tracking record for returned items (adjusts sold count)
+                  const stockTracking = new StockTracking({
+                    product: item.product,
+                    variant: {
+                      sku: item.variant.sku,
+                      attributes: item.variant.attributes
+                    },
+                    type: 'add',
+                    quantity: returnQuantity,
+                    previousStock,
+                    newStock,
+                    reason: `Order: ${order.orderId} - Returned (Partial)`,
+                    reference: order.orderId,
+                    performedBy: adminId || null,
+                    notes: `Item returned - stock added back (adjusts sold count)`
+                  });
+                  await stockTracking.save();
                 }
               } else {
+                // Get product for previous stock
+                const product = await Product.findById(item.product);
+                if (product) {
+                  previousStock = product.totalStock || 0;
+                }
+                
                 // Update main product stock
-                await Product.findByIdAndUpdate(
+                const result = await Product.findByIdAndUpdate(
                   item.product,
                   { $inc: { totalStock: +returnQuantity } },
                   { new: true }
                 );
+                
+                if (result) {
+                  newStock = result.totalStock || 0;
+                  
+                  // Create stock tracking record for returned items (adjusts sold count)
+                  const stockTracking = new StockTracking({
+                    product: item.product,
+                    variant: null,
+                    type: 'add',
+                    quantity: returnQuantity,
+                    previousStock,
+                    newStock,
+                    reason: `Order: ${order.orderId} - Returned (Partial)`,
+                    reference: order.orderId,
+                    performedBy: adminId || null,
+                    notes: `Item returned - stock added back (adjusts sold count)`
+                  });
+                  await stockTracking.save();
+                }
               }
             }
           }
         } else {
           // Full return - add back all quantities
           for (const item of order.items) {
+            let previousStock = 0;
+            let newStock = 0;
+            
             // Update variant stock if variant exists
             if (item.variant && item.variant.sku) {
+              // Get product to find variant and previous stock
+              const product = await Product.findById(item.product);
+              if (product) {
+                const variant = product.variants.find(v => v.sku === item.variant.sku);
+                if (variant) {
+                  previousStock = variant.stockQuantity || 0;
+                }
+              }
+              
               // Find variant by SKU and add stock back
               const result = await Product.findOneAndUpdate(
                 {
@@ -780,20 +1089,66 @@ exports.updateOrder = async (req, res) => {
 
               // Manually update totalStock after variant update
               if (result) {
+                const updatedVariant = result.variants.find(v => v.sku === item.variant.sku);
+                newStock = updatedVariant ? updatedVariant.stockQuantity : 0;
+                
                 const updatedTotalStock = result.variants.reduce((total, variant) => total + (variant.stockQuantity || 0), 0);
 
                 // Update totalStock and save to trigger any middleware
                 const product = await Product.findById(item.product);
                 product.totalStock = updatedTotalStock;
                 await product.save();
+                
+                // Create stock tracking record for returned items (adjusts sold count)
+                const stockTracking = new StockTracking({
+                  product: item.product,
+                  variant: {
+                    sku: item.variant.sku,
+                    attributes: item.variant.attributes
+                  },
+                  type: 'add',
+                  quantity: item.quantity,
+                  previousStock,
+                  newStock,
+                  reason: `Order: ${order.orderId} - Returned (Full)`,
+                  reference: order.orderId,
+                  performedBy: adminId || null,
+                  notes: `Item returned - stock added back (adjusts sold count)`
+                });
+                await stockTracking.save();
               }
             } else {
+              // Get product for previous stock
+              const product = await Product.findById(item.product);
+              if (product) {
+                previousStock = product.totalStock || 0;
+              }
+              
               // Update main product stock
-              await Product.findByIdAndUpdate(
+              const result = await Product.findByIdAndUpdate(
                 item.product,
                 { $inc: { totalStock: +item.quantity } },
                 { new: true }
               );
+              
+              if (result) {
+                newStock = result.totalStock || 0;
+                
+                // Create stock tracking record for returned items (adjusts sold count)
+                const stockTracking = new StockTracking({
+                  product: item.product,
+                  variant: null,
+                  type: 'add',
+                  quantity: item.quantity,
+                  previousStock,
+                  newStock,
+                  reason: `Order: ${order.orderId} - Returned (Full)`,
+                  reference: order.orderId,
+                  performedBy: adminId || null,
+                  notes: `Item returned - stock added back (adjusts sold count)`
+                });
+                await stockTracking.save();
+              }
             }
           }
         }
@@ -1297,8 +1652,6 @@ exports.createGuestOrder = async (req, res) => {
 
     // Validate address IDs if provided
     if (orderData.shippingAddress) {
-      const { Division, District, Upazila, DhakaCity } = require('../address/address.model');
-
       // Validate division ID if provided
       if (orderData.shippingAddress.divisionId) {
         const division = await Division.findOne({ id: orderData.shippingAddress.divisionId });
@@ -1427,7 +1780,19 @@ exports.createGuestOrder = async (req, res) => {
 
     // Update product stock
     for (const item of order.items) {
+      let previousStock = 0;
+      let newStock = 0;
+      
       if (item.variant && item.variant.sku) {
+        // Get product to find variant and previous stock
+        const product = await Product.findById(item.product);
+        if (product) {
+          const variant = product.variants.find(v => v.sku === item.variant.sku);
+          if (variant) {
+            previousStock = variant.stockQuantity || 0;
+          }
+        }
+        
         // Update variant stock
         const result = await Product.findOneAndUpdate(
           {
@@ -1441,23 +1806,95 @@ exports.createGuestOrder = async (req, res) => {
         );
 
         if (result) {
+          const updatedVariant = result.variants.find(v => v.sku === item.variant.sku);
+          newStock = updatedVariant ? updatedVariant.stockQuantity : 0;
+          
           // Update totalStock
           const updatedTotalStock = result.variants.reduce((total, variant) => total + (variant.stockQuantity || 0), 0);
           await Product.findByIdAndUpdate(item.product, { totalStock: updatedTotalStock });
+          
+          // Create stock tracking record for sold items
+          const stockTracking = new StockTracking({
+            product: item.product,
+            variant: {
+              sku: item.variant.sku,
+              attributes: item.variant.attributes
+            },
+            type: 'remove',
+            quantity: -item.quantity,
+            previousStock,
+            newStock,
+            reason: `Order: ${order.orderId} - Guest Order`,
+            reference: order.orderId,
+            performedBy: null,
+            notes: `Guest order - stock removed`
+          });
+          await stockTracking.save();
         }
       } else {
+        // Get product for previous stock
+        const product = await Product.findById(item.product);
+        if (product) {
+          previousStock = product.totalStock || 0;
+        }
+        
         // Update main product stock
-        await Product.findByIdAndUpdate(
+        const result = await Product.findByIdAndUpdate(
           item.product,
           { $inc: { totalStock: -item.quantity } },
           { new: true }
         );
+        
+        if (result) {
+          newStock = result.totalStock || 0;
+          
+          // Create stock tracking record for sold items
+          const stockTracking = new StockTracking({
+            product: item.product,
+            variant: null,
+            type: 'remove',
+            quantity: -item.quantity,
+            previousStock,
+            newStock,
+            reason: `Order: ${order.orderId} - Guest Order`,
+            reference: order.orderId,
+            performedBy: null,
+            notes: `Guest order - stock removed`
+          });
+          await stockTracking.save();
+        }
       }
     }
 
     // Populate the created order for response
     const populatedOrder = await Order.findById(order._id)
       .populate('items.product', 'title featuredImage slug');
+
+    // Send SMS confirmation to guest if phone number is available (if enabled in settings)
+    const guestPhone = order.guestInfo?.phone || order.manualOrderInfo?.phone || order.shippingAddress?.phone;
+    if (guestPhone) {
+      try {
+        // Check if SMS sending is enabled
+        const settings = await Settings.findOne();
+        if (settings && settings.isSendGuestOrderConfirmationSMS !== false) {
+          const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+          const trackingUrl = `${frontendUrl}/tracking?orderId=${order.orderId}`;
+          const totalAmount = order.total.toFixed(2);
+          
+          // Professional short SMS message
+          const smsMessage = `Forpink: Order #${order.orderId} confirmed. Total: ৳${totalAmount}. Track: ${trackingUrl}`;
+          
+          // Send SMS asynchronously (don't wait for it to complete)
+          sendCustomSMS(guestPhone, smsMessage).catch(smsError => {
+            console.error('Failed to send order confirmation SMS:', smsError);
+            // Don't fail the order creation if SMS fails
+          });
+        }
+      } catch (smsError) {
+        console.error('Error preparing order confirmation SMS:', smsError);
+        // Don't fail the order creation if SMS fails
+      }
+    }
 
     return sendResponse({
       res,
@@ -1478,7 +1915,7 @@ exports.createGuestOrder = async (req, res) => {
 
 exports.createManualOrder = async (req, res) => {
   try {
-    const { orderType, items, subtotal, discount, shippingCost, totalAmount, status, notes, userId, guestInfo, deliveryAddress } = req.body;
+    const { orderType, items, subtotal, discount, shippingCost, totalAmount, status, notes, userId, guestInfo, deliveryAddress, orderSource } = req.body;
 
     // Validate required fields
     if (!items || items.length === 0) {
@@ -1516,6 +1953,7 @@ exports.createManualOrder = async (req, res) => {
       },
       status: status || 'confirmed',
       orderNotes: notes || '',
+      orderSource: orderSource || 'manual', // Set order source from request or default to 'manual'
       createdBy: req.user._id, // Admin who created the order
       statusTimestamps: {
         pending: new Date(),
@@ -1660,6 +2098,31 @@ exports.createManualOrder = async (req, res) => {
     const populatedOrder = await Order.findById(order._id)
       .populate('user', 'name email phone')
       .populate('items.product', 'title featuredImage slug');
+
+    // Send SMS confirmation for guest orders (manual orders with guest type) - if enabled in settings
+    if (orderType === 'guest' && guestInfo && guestInfo.phone) {
+      try {
+        // Check if SMS sending is enabled
+        const settings = await Settings.findOne();
+        if (settings && settings.isSendGuestOrderConfirmationSMS !== false) {
+          const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+          const trackingUrl = `${frontendUrl}/tracking?orderId=${order.orderId}`;
+          const totalAmount = order.total.toFixed(2);
+          
+          // Professional short SMS message
+          const smsMessage = `Forpink: Order #${order.orderId} confirmed. Total: ৳${totalAmount}. Track: ${trackingUrl}`;
+          
+          // Send SMS asynchronously (don't wait for it to complete)
+          sendCustomSMS(guestInfo.phone, smsMessage).catch(smsError => {
+            console.error('Failed to send order confirmation SMS:', smsError);
+            // Don't fail the order creation if SMS fails
+          });
+        }
+      } catch (smsError) {
+        console.error('Error preparing order confirmation SMS:', smsError);
+        // Don't fail the order creation if SMS fails
+      }
+    }
 
     return sendResponse({
       res,
@@ -1837,7 +2300,7 @@ exports.searchOrdersByPhone = async (req, res) => {
 };
 
 // Get customer info by phone number 
-// Priority: 1. User table (registered user), 2. Orders table (previous guest orders)
+// Address comes ONLY from last order's shippingAddress (not from user table)
 exports.getCustomerInfoByPhone = async (req, res) => {
   try {
     const { phoneNumber } = req.params;
@@ -1847,80 +2310,66 @@ exports.getCustomerInfoByPhone = async (req, res) => {
       address: ''
     };
 
-    // First, search in user table for registered user
+    // Find user for name only (not for address)
     const user = await User.findOne({
       $or: [
         { phone: phoneNumber },
         { phoneNumber: phoneNumber }
       ]
-    }).select('name firstName lastName addresses phone address'); // Include address fields
+    }).select('name firstName lastName');
 
     if (user) {
-      // User found - get name and address from user table
+      // Get name from user table
       customerInfo.name = user.name || `${user.firstName || ''} ${user.lastName || ''}`.trim();
+    }
 
-      // Get address from user (priority: addresses array > address field)
-      if (user.addresses && user.addresses.length > 0) {
-        // Get default address or first address
-        const defaultAddress = user.addresses.find(addr => addr.isDefault) || user.addresses[0];
-        if (defaultAddress) {
-          customerInfo.address = [
-            defaultAddress.street || '',
-            defaultAddress.city || '',
-            defaultAddress.state || '',
-            defaultAddress.postalCode || ''
-          ].filter(Boolean).join(', ');
-        }
-      } else if (user.address) {
+    // Always get address from last order's shippingAddress (not from user table)
+    const latestOrder = await Order.findOne({
+      $or: [
+        { 'manualOrderInfo.phone': phoneNumber },
+        { 'guestInfo.phone': phoneNumber },
+        { user: user?._id } // If user found, also search by user ID
+      ],
+      isDeleted: false
+    })
+      .sort({ createdAt: -1 }) // Get the latest order
+      .select('manualOrderInfo guestInfo shippingAddress deliveryAddress user');
 
-        customerInfo.address = user.address;
-      }
-    } else {
-
-      const latestOrder = await Order.findOne({
-        $or: [
-          { 'manualOrderInfo.phone': phoneNumber }, // First check manualOrderInfo (new field)
-          { 'guestInfo.phone': phoneNumber },
-          { 'shippingAddress.phone': phoneNumber }
-        ],
-        isDeleted: false
-      })
-        .sort({ createdAt: -1 }) // Get the latest order
-        .select('manualOrderInfo guestInfo shippingAddress deliveryAddress user');
-
-      if (latestOrder) {
-        // Priority: manualOrderInfo > guestInfo > user reference
+    if (latestOrder) {
+      // Get name from order if not found in user table
+      if (!customerInfo.name) {
         if (latestOrder.manualOrderInfo?.name) {
-          // Use manualOrderInfo (best case - stores complete info)
           customerInfo.name = latestOrder.manualOrderInfo.name;
-          customerInfo.address = latestOrder.manualOrderInfo.address || '';
         } else if (latestOrder.guestInfo?.name) {
-          // Get name from guestInfo (previous guest order)
           customerInfo.name = latestOrder.guestInfo.name;
         } else if (latestOrder.user) {
-          // Order has user reference, populate and get name
           const orderUser = await User.findById(latestOrder.user).select('name firstName lastName');
           if (orderUser) {
             customerInfo.name = orderUser.name || `${orderUser.firstName || ''} ${orderUser.lastName || ''}`.trim();
           }
         }
+      }
 
-        if (!customerInfo.address) {
-          if (latestOrder.deliveryAddress) {
-            customerInfo.address = latestOrder.deliveryAddress;
-          } else if (latestOrder.shippingAddress) {
-            // Build full address from shippingAddress object
-            const addrParts = [
-              latestOrder.shippingAddress.street,
-              latestOrder.shippingAddress.city,
-              latestOrder.shippingAddress.state,
-              latestOrder.shippingAddress.postalCode
-            ].filter(Boolean);
-            customerInfo.address = addrParts.length > 0 ? addrParts.join(', ') : '';
-          } else if (latestOrder.guestInfo?.address) {
-            customerInfo.address = latestOrder.guestInfo.address;
-          }
-        }
+      // Get address from shippingAddress (priority: shippingAddress > deliveryAddress)
+      if (latestOrder.shippingAddress) {
+        // Build full address from shippingAddress object
+        const addrParts = [
+          latestOrder.shippingAddress.street,
+          latestOrder.shippingAddress.city,
+          latestOrder.shippingAddress.state,
+          latestOrder.shippingAddress.postalCode,
+          latestOrder.shippingAddress.area,
+          latestOrder.shippingAddress.upazila,
+          latestOrder.shippingAddress.district,
+          latestOrder.shippingAddress.division
+        ].filter(Boolean);
+        customerInfo.address = addrParts.length > 0 ? addrParts.join(', ') : '';
+      } else if (latestOrder.deliveryAddress) {
+        customerInfo.address = latestOrder.deliveryAddress;
+      } else if (latestOrder.manualOrderInfo?.address) {
+        customerInfo.address = latestOrder.manualOrderInfo.address;
+      } else if (latestOrder.guestInfo?.address) {
+        customerInfo.address = latestOrder.guestInfo.address;
       }
     }
 

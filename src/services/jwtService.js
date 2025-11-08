@@ -8,8 +8,8 @@ const jwt = require('jsonwebtoken');
 class JWTService {
     constructor() {
         this.secret = process.env.JWT_SECRET || 'your-secret-key';
-        this.defaultExpiry = '7d';
-        this.refreshExpiry = '30d';
+        this.defaultExpiry = '1825d'; // 5 years (5 * 365 days)
+        this.refreshExpiry = '1825d'; // 5 years
     }
 
     /**

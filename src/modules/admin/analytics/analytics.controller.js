@@ -8,30 +8,52 @@ const sendResponse = require('../../../utils/sendResponse');
 // Get comprehensive dashboard statistics
 exports.getDashboardStats = async (req, res) => {
   try {
-    const { period = '30d' } = req.query;
+    const { period = 'today' } = req.query;
     
     // Calculate date range based on period
     const now = new Date();
     let startDate;
+    let endDate;
     switch (period) {
+      case 'today':
+        startDate = new Date(now);
+        startDate.setHours(0, 0, 0, 0);
+        endDate = new Date(now);
+        endDate.setHours(23, 59, 59, 999);
+        break;
+      case 'yesterday':
+        startDate = new Date(now);
+        startDate.setDate(startDate.getDate() - 1);
+        startDate.setHours(0, 0, 0, 0);
+        endDate = new Date(now);
+        endDate.setDate(endDate.getDate() - 1);
+        endDate.setHours(23, 59, 59, 999);
+        break;
       case '7d':
         startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+        startDate.setHours(0, 0, 0, 0);
+        endDate = null;
         break;
       case '30d':
         startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+        startDate.setHours(0, 0, 0, 0);
+        endDate = null;
         break;
       case '90d':
         startDate = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
+        startDate.setHours(0, 0, 0, 0);
+        endDate = null;
         break;
       case '1y':
         startDate = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000);
+        startDate.setHours(0, 0, 0, 0);
+        endDate = null;
         break;
       default:
         startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+        startDate.setHours(0, 0, 0, 0);
+        endDate = null;
     }
-
-    // Set start date to beginning of day for more accurate filtering
-    startDate.setHours(0, 0, 0, 0);
     
 
     // Basic counts (all time)
@@ -51,69 +73,301 @@ exports.getDashboardStats = async (req, res) => {
     const returnedOrders = await Order.countDocuments({ status: 'returned', isDeleted: false });
 
     // Period-based order statistics (excluding deleted)
-    const periodOrders = await Order.countDocuments({ 
-      createdAt: { $gte: startDate },
+    const periodOrdersQuery = { 
+      createdAt: endDate ? { $gte: startDate, $lte: endDate } : { $gte: startDate },
       isDeleted: false
-    });
+    };
+    const periodOrders = await Order.countDocuments(periodOrdersQuery);
     const periodPaidOrders = await Order.countDocuments({ 
       paymentStatus: 'paid',
-      createdAt: { $gte: startDate },
-      isDeleted: false
+      ...periodOrdersQuery
     });
     const periodDeliveredOrders = await Order.countDocuments({ 
       status: 'delivered',
-      createdAt: { $gte: startDate },
-      isDeleted: false
+      ...periodOrdersQuery
     });
 
-    // Revenue calculations - include delivered orders even if payment is pending (for COD)
+    // Revenue calculations - only items subtotal (excluding shipping and discounts)
+    // Partial returns: exclude returned items' value from revenue
+    // COD orders: count when status is 'delivered' OR 'returned' (delivered orders that were returned)
+    // Non-COD orders: count when paymentStatus is 'paid' AND status is 'confirmed' OR 'returned'
     // Excluding deleted orders
     const totalSalesAgg = await Order.aggregate([
       { 
         $match: { 
           $or: [
-            { paymentStatus: 'paid' },
-            { status: 'delivered' } // Include delivered orders (COD orders)
+            // COD orders: delivered or returned status (returned means it was delivered first)
+            { paymentMethod: 'cod', status: { $in: ['delivered', 'returned'] } },
+            // Non-COD orders: paid AND (confirmed or returned)
+            { 
+              paymentMethod: { $ne: 'cod' },
+              paymentStatus: 'paid',
+              status: { $in: ['confirmed', 'returned'] }
+            }
           ],
           isDeleted: false
         } 
       },
-      { $group: { _id: null, total: { $sum: '$total' } } }
+      {
+        $project: {
+          items: 1,
+          returnQuantities: 1,
+          subtotal: {
+            $let: {
+              vars: {
+                // Calculate total items value
+                totalValue: {
+                  $reduce: {
+                    input: "$items",
+                    initialValue: 0,
+                    in: { $add: ["$$value", { $multiply: ["$$this.price", "$$this.quantity"] }] }
+                  }
+                },
+                // Calculate returned items value (if partial return exists)
+                returnedValue: {
+                  $cond: {
+                    if: { $and: [{ $ne: ["$returnQuantities", null] }, { $gt: [{ $size: { $ifNull: ["$returnQuantities", []] } }, 0] }] },
+                    then: {
+                      $reduce: {
+                        input: "$returnQuantities",
+                        initialValue: 0,
+                        in: {
+                          $add: [
+                            "$$value",
+                            {
+                              $multiply: [
+                                { $arrayElemAt: ["$items.price", "$$this.itemIndex"] },
+                                "$$this.quantity"
+                              ]
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    else: 0
+                  }
+                }
+              },
+              in: {
+                // Subtract returned value from total value
+                $subtract: ["$$totalValue", "$$returnedValue"]
+              }
+            }
+          }
+        }
+      },
+      { $group: { _id: null, total: { $sum: '$subtotal' } } }
     ]);
     const totalSales = totalSalesAgg[0]?.total || 0;
 
-    // Period-based sales - include delivered orders even if payment is pending (for COD)
+    // Period-based sales - only items subtotal (excluding shipping and discounts)
+    // Partial returns: exclude returned items' value from revenue
+    // COD orders: count when status is 'delivered' OR 'returned' (delivery date matters, not order date)
+    // Non-COD orders: count when paymentStatus is 'paid' AND status is 'confirmed' OR 'returned' (order date)
     // Excluding deleted orders
+    const periodSalesMatch = {
+      $or: [
+        // COD orders: delivered or returned status (returned means it was delivered first)
+        { paymentMethod: 'cod', status: { $in: ['delivered', 'returned'] } },
+        // Non-COD orders: paid AND (confirmed or returned)
+        { 
+          paymentMethod: { $ne: 'cod' },
+          paymentStatus: 'paid',
+          status: { $in: ['confirmed', 'returned'] }
+        }
+      ],
+      isDeleted: false
+    };
+    
+    // For COD: filter by delivery date (statusTimestamps.delivered, fallback to createdAt if missing)
+    // For Non-COD: filter by order creation date (createdAt)
     const periodSalesAgg = await Order.aggregate([
       { 
-        $match: { 
-          $or: [
-            { paymentStatus: 'paid' },
-            { status: 'delivered' } // Include delivered orders (COD orders)
-          ],
-          createdAt: { $gte: startDate },
-          isDeleted: false
-        } 
+        $match: periodSalesMatch
       },
-      { $group: { _id: null, total: { $sum: '$total' } } }
+      {
+        $addFields: {
+          // Determine which date to use based on payment method
+          relevantDate: {
+            $cond: {
+              if: { $eq: ["$paymentMethod", "cod"] },
+              then: {
+                // COD: use delivery date, fallback to createdAt if delivered timestamp is missing
+                $ifNull: ["$statusTimestamps.delivered", "$createdAt"]
+              },
+              else: "$createdAt" // Non-COD: use order date
+            }
+          }
+        }
+      },
+      {
+        $match: endDate 
+          ? {
+              relevantDate: { 
+                $ne: null, // Exclude null dates
+                $gte: startDate, 
+                $lte: endDate 
+              }
+            }
+          : {
+              relevantDate: { 
+                $ne: null, // Exclude null dates
+                $gte: startDate 
+              }
+            }
+      },
+      {
+        $project: {
+          items: 1,
+          returnQuantities: 1,
+          subtotal: {
+            $let: {
+              vars: {
+                // Calculate total items value
+                totalValue: {
+                  $reduce: {
+                    input: "$items",
+                    initialValue: 0,
+                    in: { $add: ["$$value", { $multiply: ["$$this.price", "$$this.quantity"] }] }
+                  }
+                },
+                // Calculate returned items value (if partial return exists)
+                returnedValue: {
+                  $cond: {
+                    if: { $and: [{ $ne: ["$returnQuantities", null] }, { $gt: [{ $size: { $ifNull: ["$returnQuantities", []] } }, 0] }] },
+                    then: {
+                      $reduce: {
+                        input: "$returnQuantities",
+                        initialValue: 0,
+                        in: {
+                          $add: [
+                            "$$value",
+                            {
+                              $multiply: [
+                                { $arrayElemAt: ["$items.price", "$$this.itemIndex"] },
+                                "$$this.quantity"
+                              ]
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    else: 0
+                  }
+                }
+              },
+              in: {
+                // Subtract returned value from total value
+                $subtract: ["$$totalValue", "$$returnedValue"]
+              }
+            }
+          }
+        }
+      },
+      { $group: { _id: null, total: { $sum: '$subtotal' } } }
     ]);
     const periodSales = periodSalesAgg[0]?.total || 0;
 
-    // Previous period for comparison - include delivered orders even if payment is pending (for COD)
+    // Previous period for comparison - only items subtotal (excluding shipping and discounts)
+    // Partial returns: exclude returned items' value from revenue
+    // COD orders: count when status is 'delivered' OR 'returned' (delivery date matters)
+    // Non-COD orders: count when paymentStatus is 'paid' AND status is 'confirmed' OR 'returned' (order date)
     // Excluding deleted orders
-    const previousStartDate = new Date(startDate.getTime() - (now.getTime() - startDate.getTime()));
+    const periodDuration = endDate 
+      ? (endDate.getTime() - startDate.getTime()) 
+      : (now.getTime() - startDate.getTime());
+    const previousStartDate = new Date(startDate.getTime() - periodDuration);
+    const previousEndDate = startDate;
+    
     const previousSalesAgg = await Order.aggregate([
       { 
         $match: { 
           $or: [
-            { paymentStatus: 'paid' },
-            { status: 'delivered' } // Include delivered orders (COD orders)
+            // COD orders: delivered or returned status (returned means it was delivered first)
+            { paymentMethod: 'cod', status: { $in: ['delivered', 'returned'] } },
+            // Non-COD orders: paid AND (confirmed or returned)
+            { 
+              paymentMethod: { $ne: 'cod' },
+              paymentStatus: 'paid',
+              status: { $in: ['confirmed', 'returned'] }
+            }
           ],
-          createdAt: { $gte: previousStartDate, $lt: startDate },
           isDeleted: false
         } 
       },
-      { $group: { _id: null, total: { $sum: '$total' } } }
+      {
+        $addFields: {
+          // Determine which date to use based on payment method
+          relevantDate: {
+            $cond: {
+              if: { $eq: ["$paymentMethod", "cod"] },
+              then: {
+                // COD: use delivery date, fallback to createdAt if delivered timestamp is missing
+                $ifNull: ["$statusTimestamps.delivered", "$createdAt"]
+              },
+              else: "$createdAt" // Non-COD: use order date
+            }
+          }
+        }
+      },
+      {
+        $match: {
+          relevantDate: { 
+            $ne: null, // Exclude null dates
+            $gte: previousStartDate, 
+            $lt: previousEndDate 
+          }
+        }
+      },
+      {
+        $project: {
+          items: 1,
+          returnQuantities: 1,
+          subtotal: {
+            $let: {
+              vars: {
+                // Calculate total items value
+                totalValue: {
+                  $reduce: {
+                    input: "$items",
+                    initialValue: 0,
+                    in: { $add: ["$$value", { $multiply: ["$$this.price", "$$this.quantity"] }] }
+                  }
+                },
+                // Calculate returned items value (if partial return exists)
+                returnedValue: {
+                  $cond: {
+                    if: { $and: [{ $ne: ["$returnQuantities", null] }, { $gt: [{ $size: { $ifNull: ["$returnQuantities", []] } }, 0] }] },
+                    then: {
+                      $reduce: {
+                        input: "$returnQuantities",
+                        initialValue: 0,
+                        in: {
+                          $add: [
+                            "$$value",
+                            {
+                              $multiply: [
+                                { $arrayElemAt: ["$items.price", "$$this.itemIndex"] },
+                                "$$this.quantity"
+                              ]
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    else: 0
+                  }
+                }
+              },
+              in: {
+                // Subtract returned value from total value
+                $subtract: ["$$totalValue", "$$returnedValue"]
+              }
+            }
+          }
+        }
+      },
+      { $group: { _id: null, total: { $sum: '$subtotal' } } }
     ]);
     const previousSales = previousSalesAgg[0]?.total || 0;
 
@@ -150,13 +404,13 @@ exports.getDashboardStats = async (req, res) => {
 
     // Recent orders (period-based, excluding deleted)
     const recentOrders = await Order.find({
-      createdAt: { $gte: startDate },
+      createdAt: endDate ? { $gte: startDate, $lte: endDate } : { $gte: startDate },
       isDeleted: false
     })
       .sort({ createdAt: -1 })
       .limit(10)
       .populate('user', 'name email phone')
-      .select('orderId user total status paymentStatus createdAt items');
+      .select('orderId user total status paymentStatus paymentMethod createdAt items discount couponDiscount loyaltyDiscount upsellDiscount coupon orderSource orderType manualOrderInfo');
 
     // Order status distribution
     const orderStatusDistribution = {
@@ -183,26 +437,107 @@ exports.getDashboardStats = async (req, res) => {
       { $group: { _id: '$paymentMethod', count: { $sum: 1 }, total: { $sum: '$total' } } }
     ]);
 
-    // Monthly sales data for chart - include delivered orders even if payment is pending (for COD)
+    // Monthly sales data for chart - only items subtotal (excluding shipping and discounts)
+    // Partial returns: exclude returned items' value from revenue
+    // COD orders: count when status is 'delivered' OR 'returned' (delivery date matters)
+    // Non-COD orders: count when paymentStatus is 'paid' AND status is 'confirmed' OR 'returned' (order date)
     // Excluding deleted orders
     const monthlySales = await Order.aggregate([
       {
         $match: {
           $or: [
-            { paymentStatus: 'paid' },
-            { status: 'delivered' } // Include delivered orders (COD orders)
+            // COD orders: delivered or returned status (returned means it was delivered first)
+            { paymentMethod: 'cod', status: { $in: ['delivered', 'returned'] } },
+            // Non-COD orders: paid AND (confirmed or returned)
+            { 
+              paymentMethod: { $ne: 'cod' },
+              paymentStatus: 'paid',
+              status: { $in: ['confirmed', 'returned'] }
+            }
           ],
-          createdAt: { $gte: new Date(now.getTime() - 6 * 30 * 24 * 60 * 60 * 1000) },
           isDeleted: false
+        }
+      },
+      {
+        $addFields: {
+          // Determine which date to use based on payment method
+          relevantDate: {
+            $cond: {
+              if: { $eq: ["$paymentMethod", "cod"] },
+              then: {
+                // COD: use delivery date, fallback to createdAt if delivered timestamp is missing
+                $ifNull: ["$statusTimestamps.delivered", "$createdAt"]
+              },
+              else: "$createdAt" // Non-COD: use order date
+            }
+          }
+        }
+      },
+      {
+        $match: {
+          relevantDate: { 
+            $ne: null, // Exclude null dates
+            $gte: new Date(now.getTime() - 6 * 30 * 24 * 60 * 60 * 1000) 
+          }
+        }
+      },
+      {
+        $project: {
+          year: { $year: "$relevantDate" },
+          month: { $month: "$relevantDate" },
+          items: 1,
+          returnQuantities: 1,
+          subtotal: {
+            $let: {
+              vars: {
+                // Calculate total items value
+                totalValue: {
+                  $reduce: {
+                    input: "$items",
+                    initialValue: 0,
+                    in: { $add: ["$$value", { $multiply: ["$$this.price", "$$this.quantity"] }] }
+                  }
+                },
+                // Calculate returned items value (if partial return exists)
+                returnedValue: {
+                  $cond: {
+                    if: { $and: [{ $ne: ["$returnQuantities", null] }, { $gt: [{ $size: { $ifNull: ["$returnQuantities", []] } }, 0] }] },
+                    then: {
+                      $reduce: {
+                        input: "$returnQuantities",
+                        initialValue: 0,
+                        in: {
+                          $add: [
+                            "$$value",
+                            {
+                              $multiply: [
+                                { $arrayElemAt: ["$items.price", "$$this.itemIndex"] },
+                                "$$this.quantity"
+                              ]
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    else: 0
+                  }
+                }
+              },
+              in: {
+                // Subtract returned value from total value
+                $subtract: ["$$totalValue", "$$returnedValue"]
+              }
+            }
+          }
         }
       },
       {
         $group: {
           _id: {
-            year: { $year: '$createdAt' },
-            month: { $month: '$createdAt' }
+            year: "$year",
+            month: "$month"
           },
-          total: { $sum: '$total' },
+          total: { $sum: '$subtotal' },
           count: { $sum: 1 }
         }
       },

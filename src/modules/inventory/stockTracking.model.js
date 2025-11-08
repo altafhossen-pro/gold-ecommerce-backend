@@ -17,7 +17,7 @@ const stockTrackingSchema = new mongoose.Schema({
   },
   type: {
     type: String,
-    enum: ['add', 'remove'],
+    enum: ['add', 'remove', 'adjustment'],
     required: true
   },
   quantity: {

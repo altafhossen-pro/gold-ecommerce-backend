@@ -67,6 +67,16 @@ const settingsSchema = new mongoose.Schema({
     default: true 
   },
   
+  // Email & SMS Settings
+  isSendOrderConfirmationEmail: {
+    type: Boolean,
+    default: true
+  },
+  isSendGuestOrderConfirmationSMS: {
+    type: Boolean,
+    default: false
+  },
+  
   // Admin who last updated
   updatedBy: { 
     type: mongoose.Schema.Types.ObjectId, 

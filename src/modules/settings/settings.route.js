@@ -21,4 +21,8 @@ router.put('/loyalty', verifyToken, verifyTokenAdmin, settingsController.updateL
 router.get('/delivery-charge', settingsController.getDeliveryChargeSettings);
 router.put('/delivery-charge', verifyToken, verifyTokenAdmin, settingsController.updateDeliveryChargeSettings);
 
+// Email & SMS settings endpoints
+router.get('/email-sms', settingsController.getEmailSMSSettings);
+router.put('/email-sms', verifyToken, verifyTokenAdmin, settingsController.updateEmailSMSSettings);
+
 module.exports = router;
