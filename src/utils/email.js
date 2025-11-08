@@ -156,6 +156,9 @@ const sendOrderConfirmationEmail = async (order, user) => {
     // Calculate total discounts
     const totalDiscounts = (order.discount || 0) + (order.couponDiscount || 0) + (order.upsellDiscount || 0) + (order.loyaltyDiscount || 0);
     
+    // Calculate final total: Subtotal + Shipping - Discounts
+    const finalTotal = subtotal + (order.shippingCost || 0) - totalDiscounts;
+    
     // Build items HTML (without images)
     const itemsHtml = order.items.map((item, index) => {
       const variantInfo = item.variant ? 
@@ -254,6 +257,7 @@ const sendOrderConfirmationEmail = async (order, user) => {
     });
 
     // Build structured data (JSON-LD) for Gmail Purchase category
+    // Note: finalTotal is calculated above, so we'll use it here
     const structuredData = {
       "@context": "http://schema.org",
       "@type": "Order",
@@ -264,7 +268,7 @@ const sendOrderConfirmationEmail = async (order, user) => {
       },
       "orderNumber": order.orderId,
       "priceCurrency": "BDT",
-      "price": order.total.toFixed(2),
+      "price": finalTotal.toFixed(2),
       "acceptedOffer": acceptedOffers,
       "url": orderDetailsUrl,
       "orderStatus": getOrderStatusSchema(order.status),
@@ -277,7 +281,7 @@ const sendOrderConfirmationEmail = async (order, user) => {
     };
 
     const subject = `Order Confirmation - #${order.orderId}`;
-    const text = `Thank you for your order! Your order #${order.orderId} has been confirmed. Total: ৳${order.total.toFixed(2)}. View details: ${orderDetailsUrl}`;
+    const text = `Thank you for your order! Your order #${order.orderId} has been confirmed. Total: ৳${finalTotal.toFixed(2)}. View details: ${orderDetailsUrl}`;
 
     const html = `
       <!DOCTYPE html>
@@ -376,7 +380,7 @@ const sendOrderConfirmationEmail = async (order, user) => {
                         ` : ''}
                         <tr style="border-top: 2px solid #e5e7eb;">
                           <td style="padding: 12px 0 0; color: #1f2937; font-size: 16px; font-weight: 700;">Total:</td>
-                          <td style="padding: 12px 0 0; text-align: right; color: #be185d; font-size: 18px; font-weight: 700;">৳${order.total.toFixed(2)}</td>
+                          <td style="padding: 12px 0 0; text-align: right; color: #be185d; font-size: 18px; font-weight: 700;">৳${finalTotal.toFixed(2)}</td>
                         </tr>
                       </table>
                     </div>
