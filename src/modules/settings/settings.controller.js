@@ -294,3 +294,66 @@ exports.updateEmailSMSSettings = async (req, res) => {
     });
   }
 };
+
+// Get affiliate settings
+exports.getAffiliateSettings = async (req, res) => {
+  try {
+    let settings = await Settings.findOne();
+    
+    // If no settings exist, create default settings
+    if (!settings) {
+      settings = new Settings();
+      await settings.save();
+    }
+    
+    return sendResponse({
+      res,
+      statusCode: 200,
+      success: true,
+      message: 'Affiliate settings retrieved successfully',
+      data: settings.affiliateSettings || {}
+    });
+  } catch (error) {
+    return sendResponse({
+      res,
+      statusCode: 500,
+      success: false,
+      message: error.message || 'Server error'
+    });
+  }
+};
+
+// Update affiliate settings
+exports.updateAffiliateSettings = async (req, res) => {
+  try {
+    const affiliateData = req.body;
+    
+    let settings = await Settings.findOne();
+    
+    if (!settings) {
+      // Create new settings if none exist
+      settings = new Settings();
+    }
+    
+    // Update only affiliate settings
+    Object.assign(settings.affiliateSettings, affiliateData);
+    settings.updatedBy = req.user._id;
+    
+    await settings.save();
+    
+    return sendResponse({
+      res,
+      statusCode: 200,
+      success: true,
+      message: 'Affiliate settings updated successfully',
+      data: settings.affiliateSettings
+    });
+  } catch (error) {
+    return sendResponse({
+      res,
+      statusCode: 500,
+      success: false,
+      message: error.message || 'Server error'
+    });
+  }
+};

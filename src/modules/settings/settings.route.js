@@ -25,4 +25,8 @@ router.put('/delivery-charge', verifyToken, verifyTokenAdmin, settingsController
 router.get('/email-sms', settingsController.getEmailSMSSettings);
 router.put('/email-sms', verifyToken, verifyTokenAdmin, settingsController.updateEmailSMSSettings);
 
+// Affiliate settings endpoints
+router.get('/affiliate', settingsController.getAffiliateSettings);
+router.put('/affiliate', verifyToken, verifyTokenAdmin, settingsController.updateAffiliateSettings);
+
 module.exports = router;

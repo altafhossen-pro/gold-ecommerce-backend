@@ -77,6 +77,43 @@ const settingsSchema = new mongoose.Schema({
     default: false
   },
   
+  // Affiliate Settings
+  affiliateSettings: {
+    // Discount for purchaser (who uses affiliate link)
+    purchaserDiscountType: {
+      type: String,
+      enum: ['percentage', 'fixed'],
+      default: 'percentage'
+    },
+    purchaserDiscountValue: {
+      type: Number,
+      default: 5, // 5% or 5 ৳
+      min: 0
+    },
+    // Loyalty points for referrer (affiliate owner) per purchase
+    referrerLoyaltyPointsPerPurchase: {
+      type: Number,
+      default: 10,
+      min: 0
+    },
+    // Loyalty points for purchaser (if logged in user) per purchase
+    purchaserLoyaltyPointsPerPurchase: {
+      type: Number,
+      default: 5,
+      min: 0
+    },
+    // Is affiliate system enabled
+    isAffiliateEnabled: {
+      type: Boolean,
+      default: true
+    },
+    // Show confirmation modal when affiliate link is used
+    isConfirmationModalShowWhenUseAffiliateLink: {
+      type: Boolean,
+      default: true
+    }
+  },
+  
   // Admin who last updated
   updatedBy: { 
     type: mongoose.Schema.Types.ObjectId, 

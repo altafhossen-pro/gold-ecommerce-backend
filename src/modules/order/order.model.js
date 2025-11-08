@@ -115,6 +115,13 @@ const orderSchema = new mongoose.Schema({
     },
     isGuestOrder: { type: Boolean, default: false }, // To distinguish guest orders
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }, // For manual orders
+    // Guest order customer information (for checkout guest orders)
+    guestInfo: {
+        name: { type: String },
+        phone: { type: String, index: true }, // Index for faster search
+        address: { type: String },
+        email: { type: String }
+    },
     // Manual order customer information (for easy search by phone)
     manualOrderInfo: {
         name: { type: String },

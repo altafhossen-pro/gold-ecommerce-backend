@@ -1774,6 +1774,8 @@ exports.createGuestOrder = async (req, res) => {
       pending: new Date()
     };
 
+    // guestInfo will be saved automatically if provided in orderData
+
     // Create the order
     const order = new Order(orderData);
     await order.save();
