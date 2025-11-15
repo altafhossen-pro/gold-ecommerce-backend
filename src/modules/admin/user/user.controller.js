@@ -13,17 +13,22 @@ exports.listUsers = async (req, res) => {
     const search = req.query.search || '';
     const status = req.query.status || '';
     const role = req.query.role || '';
+    const staffOnly = req.query.staffOnly === 'true'; // Filter for staff only (users with roleId)
+    const customersOnly = req.query.customersOnly === 'true'; // Filter for customers only (role='customer' AND roleId is null)
 
     // Build query filter
     let queryFilter = {};
+    const andConditions = [];
     
     // Search filter
     if (search) {
-      queryFilter.$or = [
-        { name: { $regex: search, $options: 'i' } },
-        { email: { $regex: search, $options: 'i' } },
-        { phone: { $regex: search, $options: 'i' } }
-      ];
+      andConditions.push({
+        $or: [
+          { name: { $regex: search, $options: 'i' } },
+          { email: { $regex: search, $options: 'i' } },
+          { phone: { $regex: search, $options: 'i' } }
+        ]
+      });
     }
 
     // Status filter
@@ -31,9 +36,54 @@ exports.listUsers = async (req, res) => {
       queryFilter.status = status;
     }
     
-    // Role filter
-    if (role) {
+    // Customers only filter (role='customer' AND roleId is null/doesn't exist)
+    if (customersOnly) {
+      andConditions.push({
+        $and: [
+          { role: 'customer' },
+          {
+            $or: [
+              { roleId: { $exists: false } },
+              { roleId: null }
+            ]
+          }
+        ]
+      });
+    } else if (staffOnly) {
+      // Staff only filter: users with roleId (ObjectId exists and not null)
+      // Staff = roleId exists AND roleId is not null AND roleId is ObjectId type (BSON type 7)
+      // Customer = roleId doesn't exist OR roleId is null
+      andConditions.push({
+        $and: [
+          { roleId: { $exists: true } },
+          { roleId: { $ne: null } },
+          { roleId: { $type: 7 } } // BSON type 7 = ObjectId
+        ]
+      });
+    } else if (role) {
+      // Role filter (only if not using staffOnly or customersOnly)
       queryFilter.role = role;
+    }
+
+    // Combine all conditions with $and if needed
+    if (andConditions.length > 0) {
+      const baseFilter = { ...queryFilter };
+      // Clear queryFilter to rebuild
+      Object.keys(queryFilter).forEach(key => delete queryFilter[key]);
+      
+      // Build $and array - only include baseFilter if it has properties
+      if (Object.keys(baseFilter).length > 0) {
+        queryFilter.$and = [baseFilter, ...andConditions];
+      } else {
+        // If baseFilter is empty, just use andConditions directly
+        if (andConditions.length === 1) {
+          // If only one condition, merge it directly
+          Object.assign(queryFilter, andConditions[0]);
+        } else {
+          // Multiple conditions need $and
+          queryFilter.$and = andConditions;
+        }
+      }
     }
 
     const total = await User.countDocuments(queryFilter);
@@ -64,8 +114,31 @@ exports.listUsers = async (req, res) => {
 
 exports.getUserById = async (req, res) => {
   try {
-    const user = await User.findById(req.params.id);
+    const user = await User.findById(req.params.id).populate('roleId', 'name isSuperAdmin');
     if (!user) return sendResponse({ res, statusCode: 404, success: false, message: 'User not found' });
+    
+    // Check if target user is staff (has roleId)
+    const targetIsStaff = user.roleId && user.roleId._id;
+    
+    // If target user is staff, only Super Admin can view/edit
+    if (targetIsStaff) {
+      // Resolve requester super admin status
+      let requesterIsSuperAdmin = false;
+      if (req.user?.roleId) {
+        const requesterRole = await Role.findById(req.user.roleId);
+        requesterIsSuperAdmin = !!requesterRole?.isSuperAdmin;
+      }
+      
+      if (!requesterIsSuperAdmin) {
+        return sendResponse({ 
+          res, 
+          statusCode: 403, 
+          success: false, 
+          message: "Only Super Admin can view or edit staff user data" 
+        });
+      }
+    }
+    
     return sendResponse({ res, statusCode: 200, success: true, message: 'User fetched', data: user });
   } catch (error) {
     return sendResponse({ res, statusCode: 500, success: false, message: error.message });
@@ -75,6 +148,15 @@ exports.getUserById = async (req, res) => {
 exports.updateUser = async (req, res) => {
   try {
     const updateData = { ...req.body };
+    
+    // Fetch the target user first to check if they are staff
+    const targetUser = await User.findById(req.params.id).populate('roleId', 'name isSuperAdmin');
+    if (!targetUser) {
+      return sendResponse({ res, statusCode: 404, success: false, message: 'User not found' });
+    }
+    
+    // Check if target user is staff (has roleId)
+    const targetIsStaff = targetUser.roleId && targetUser.roleId._id;
     
     // Check if user is trying to update their own account
     const isSelfUpdate = String(req.params.id) === String(req.user._id);
@@ -86,11 +168,20 @@ exports.updateUser = async (req, res) => {
       requesterIsSuperAdmin = !!requesterRole?.isSuperAdmin;
     }
     
+    // If target user is staff, only Super Admin can update
+    if (targetIsStaff && !requesterIsSuperAdmin) {
+      return sendResponse({ 
+        res, 
+        statusCode: 403, 
+        success: false, 
+        message: "Only Super Admin can update staff user data" 
+      });
+    }
+    
     // Check if email is being updated - only Super Admin can change emails
     if (Object.prototype.hasOwnProperty.call(updateData, 'email')) {
-      // Fetch the current user to compare email
-      const currentUser = await User.findById(req.params.id);
-      if (currentUser && currentUser.email !== updateData.email) {
+      // Use targetUser that was already fetched
+      if (targetUser && targetUser.email !== updateData.email) {
         // Email is being changed
         if (!requesterIsSuperAdmin) {
           return sendResponse({ res, statusCode: 403, success: false, message: "Only Super Admin can change email addresses" });
@@ -100,10 +191,12 @@ exports.updateUser = async (req, res) => {
     
     // Check if roleId is being updated
     if (Object.prototype.hasOwnProperty.call(updateData, 'roleId')) {
-      // Check if user has manage_roles permission
-      const hasManageRolesPermission = await checkUserPermission(req.user, 'user', 'manage_roles');
-      if (!requesterIsSuperAdmin && !hasManageRolesPermission) {
-        return sendResponse({ res, statusCode: 403, success: false, message: "You don't have permission to manage user roles" });
+      // Check if user has role.update permission (module: 'role', action: 'update')
+      const hasRoleUpdatePermission = await checkUserPermission(req.user, 'role', 'update');
+      
+      // Require role.update permission (unless super admin)
+      if (!requesterIsSuperAdmin && !hasRoleUpdatePermission) {
+        return sendResponse({ res, statusCode: 403, success: false, message: "Permission Denied: You don't have permission to change user roles. Please contact your administrator to grant Role Management access." });
       }
       
       // Prevent non-Super Admin users from updating their own role

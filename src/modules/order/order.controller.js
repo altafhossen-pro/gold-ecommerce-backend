@@ -11,6 +11,8 @@ const { incrementCouponUsage } = require('../coupon/coupon.controller');
 const sendResponse = require('../../utils/sendResponse');
 const { sendOrderConfirmationEmail } = require('../../utils/email');
 const { sendCustomSMS } = require('../../utils/smsService');
+const { Affiliate } = require('../affiliate/affiliate.model');
+const { AffiliateTracking } = require('../affiliate/affiliateTracking.model');
 
 exports.createOrder = async (req, res) => {
   try {
@@ -285,6 +287,42 @@ exports.createOrder = async (req, res) => {
     // No totalSold update on order creation
     // totalSold will be updated when order status becomes 'delivered'
 
+    // Handle affiliate tracking if affiliate code was used
+    if (order.affiliateOrder && order.affiliateOrder.affiliateCode) {
+      try {
+        // Find affiliate by code to get referrer user
+        const affiliate = await Affiliate.findOne({ 
+          affiliateCode: order.affiliateOrder.affiliateCode.toUpperCase() 
+        });
+
+        if (affiliate && affiliate.isActive) {
+          // Create affiliate tracking record
+          const trackingData = {
+            user: order.user || null, // Can be null for guest orders
+            mobileNumber: order.user ? null : (order.guestInfo?.phone || null), // For guest orders
+            affiliateCode: order.affiliateOrder.affiliateCode.toUpperCase(),
+            order: order._id,
+            referrer: affiliate.user,
+            orderTotal: order.total,
+            affiliateDiscount: order.affiliateOrder.affiliateDiscount || 0
+          };
+
+          // Only create if we have either user or mobileNumber
+          if (trackingData.user || trackingData.mobileNumber) {
+            await AffiliateTracking.create(trackingData);
+          }
+
+          // Update affiliate stats
+          affiliate.totalPurchases += 1;
+          affiliate.totalPurchaseAmount += order.total;
+          await affiliate.save();
+        }
+      } catch (affiliateError) {
+        console.error('Error creating affiliate tracking:', affiliateError);
+        // Don't fail the order creation if affiliate tracking fails
+      }
+    }
+
     // Send order confirmation email to logged-in users (if enabled in settings)
     if (order.user && !order.isGuestOrder) {
       try {
@@ -415,7 +453,9 @@ exports.getAdminOrders = async (req, res) => {
       orderId, // Keep for backward compatibility
       email, // Keep for backward compatibility
       phone, // Keep for backward compatibility
-      includeDeleted = false // Optional: include deleted orders
+      includeDeleted = false, // Optional: include deleted orders
+      startDate, // Date range filter - start date (ISO format or YYYY-MM-DD)
+      endDate // Date range filter - end date (ISO format or YYYY-MM-DD)
     } = req.query;
 
     // Use unified search if provided, otherwise fall back to individual filters
@@ -527,6 +567,29 @@ exports.getAdminOrders = async (req, res) => {
     // Payment status filter
     if (paymentStatus && paymentStatus !== 'all') {
       filterConditions.push({ paymentStatus });
+    }
+
+    // Date range filter
+    if (startDate || endDate) {
+      const dateFilter = {};
+      
+      if (startDate) {
+        // Parse start date - set to beginning of day (00:00:00)
+        const start = new Date(startDate);
+        start.setHours(0, 0, 0, 0);
+        dateFilter.$gte = start;
+      }
+      
+      if (endDate) {
+        // Parse end date - set to end of day (23:59:59)
+        const end = new Date(endDate);
+        end.setHours(23, 59, 59, 999);
+        dateFilter.$lte = end;
+      }
+      
+      if (Object.keys(dateFilter).length > 0) {
+        filterConditions.push({ createdAt: dateFilter });
+      }
     }
 
     // Deleted filter
@@ -1177,6 +1240,84 @@ exports.updateOrder = async (req, res) => {
         } else if (order.paymentMethod === 'cod' && order.loyaltyPointsUsed > 0) {
         }
       }
+
+      // Add affiliate loyalty points to purchaser (if logged in and affiliate code was used)
+      if (order.affiliateOrder && order.affiliateOrder.affiliateCode && order.user) {
+        try {
+          const purchaserPoints = parseInt(order.affiliateOrder.purchaserLoyaltyPointsPerPurchase || '0');
+          if (purchaserPoints > 0) {
+            // Find or create loyalty record for purchaser
+            let purchaserLoyalty = await Loyalty.findOne({ user: order.user });
+            if (!purchaserLoyalty) {
+              purchaserLoyalty = new Loyalty({ user: order.user, points: 0, coins: 0, history: [] });
+            }
+
+            // Check if points already awarded (to avoid duplicate awards)
+            const tracking = await AffiliateTracking.findOne({ order: order._id });
+            if (tracking && tracking.purchaserPointsAwarded) {
+              console.log('Purchaser loyalty points already awarded for this order');
+            } else {
+              // Add points
+              purchaserLoyalty.coins += purchaserPoints;
+              purchaserLoyalty.history.unshift({
+                type: 'earn',
+                points: 0,
+                coins: purchaserPoints,
+                order: order._id,
+                description: `Affiliate purchase bonus: ${purchaserPoints} coins (Order #${order.orderId})`
+              });
+              await purchaserLoyalty.save();
+
+              // Update affiliate tracking record
+              if (tracking) {
+                tracking.purchaserPointsAwarded = true;
+                tracking.purchaserPointsAwardedAt = new Date();
+                await tracking.save();
+              }
+            }
+          }
+        } catch (affiliateError) {
+          console.error('Error adding purchaser affiliate loyalty points:', affiliateError);
+          // Don't fail the order update if affiliate points fail
+        }
+      }
+
+      // Add affiliate loyalty points to referrer (if affiliate code was used)
+      if (order.affiliateOrder && order.affiliateOrder.affiliateCode) {
+        try {
+          const referrerPoints = parseInt(order.affiliateOrder.referrerLoyaltyPointsPerPurchase || '0');
+          if (referrerPoints > 0) {
+            // Find affiliate tracking record to get referrer
+            const tracking = await AffiliateTracking.findOne({ order: order._id }).populate('referrer');
+            if (tracking && tracking.referrer && !tracking.referrerPointsAwarded) {
+              // Find or create loyalty record for referrer
+              let referrerLoyalty = await Loyalty.findOne({ user: tracking.referrer._id });
+              if (!referrerLoyalty) {
+                referrerLoyalty = new Loyalty({ user: tracking.referrer._id, points: 0, coins: 0, history: [] });
+              }
+
+              // Add points
+              referrerLoyalty.coins += referrerPoints;
+              referrerLoyalty.history.unshift({
+                type: 'earn',
+                points: 0,
+                coins: referrerPoints,
+                order: order._id,
+                description: `Affiliate referral bonus: ${referrerPoints} coins (Order #${order.orderId})`
+              });
+              await referrerLoyalty.save();
+
+              // Update tracking record
+              tracking.referrerPointsAwarded = true;
+              tracking.referrerPointsAwardedAt = new Date();
+              await tracking.save();
+            }
+          }
+        } catch (affiliateError) {
+          console.error('Error adding referrer affiliate loyalty points:', affiliateError);
+          // Don't fail the order update if affiliate points fail
+        }
+      }
     }
 
     // If payment status changed to 'paid', earn coins (for online payments) - but not if paid with loyalty points
@@ -1497,6 +1638,7 @@ exports.updateOrderComprehensive = async (req, res) => {
           );
         }
       }
+
     }
 
     if (updateData.status === 'returned' && oldOrder.status !== 'returned') {
@@ -1523,6 +1665,84 @@ exports.updateOrderComprehensive = async (req, res) => {
           item.product,
           { $inc: { totalSold: item.quantity } }
         );
+      }
+
+      // Add affiliate loyalty points to purchaser (if logged in and affiliate code was used)
+      if (updatedOrder.affiliateOrder && updatedOrder.affiliateOrder.affiliateCode && updatedOrder.user) {
+        try {
+          const purchaserPoints = parseInt(updatedOrder.affiliateOrder.purchaserLoyaltyPointsPerPurchase || '0');
+          if (purchaserPoints > 0) {
+            // Find or create loyalty record for purchaser
+            let purchaserLoyalty = await Loyalty.findOne({ user: updatedOrder.user });
+            if (!purchaserLoyalty) {
+              purchaserLoyalty = new Loyalty({ user: updatedOrder.user, points: 0, coins: 0, history: [] });
+            }
+
+            // Check if points already awarded (to avoid duplicate awards)
+            const tracking = await AffiliateTracking.findOne({ order: updatedOrder._id });
+            if (tracking && tracking.purchaserPointsAwarded) {
+              
+            } else {
+              // Add points
+              purchaserLoyalty.coins += purchaserPoints;
+              purchaserLoyalty.history.unshift({
+                type: 'earn',
+                points: 0,
+                coins: purchaserPoints,
+                order: updatedOrder._id,
+                description: `Affiliate purchase bonus: ${purchaserPoints} coins (Order #${updatedOrder.orderId})`
+              });
+              await purchaserLoyalty.save();
+
+              // Update affiliate tracking record
+              if (tracking) {
+                tracking.purchaserPointsAwarded = true;
+                tracking.purchaserPointsAwardedAt = new Date();
+                await tracking.save();
+              }
+            }
+          }
+        } catch (affiliateError) {
+          console.error('Error adding purchaser affiliate loyalty points:', affiliateError);
+          // Don't fail the order update if affiliate points fail
+        }
+      }
+
+      // Add affiliate loyalty points to referrer (if affiliate code was used)
+      if (updatedOrder.affiliateOrder && updatedOrder.affiliateOrder.affiliateCode) {
+        try {
+          const referrerPoints = parseInt(updatedOrder.affiliateOrder.referrerLoyaltyPointsPerPurchase || '0');
+          if (referrerPoints > 0) {
+            // Find affiliate tracking record to get referrer
+            const tracking = await AffiliateTracking.findOne({ order: updatedOrder._id }).populate('referrer');
+            if (tracking && tracking.referrer && !tracking.referrerPointsAwarded) {
+              // Find or create loyalty record for referrer
+              let referrerLoyalty = await Loyalty.findOne({ user: tracking.referrer._id });
+              if (!referrerLoyalty) {
+                referrerLoyalty = new Loyalty({ user: tracking.referrer._id, points: 0, coins: 0, history: [] });
+              }
+
+              // Add points
+              referrerLoyalty.coins += referrerPoints;
+              referrerLoyalty.history.unshift({
+                type: 'earn',
+                points: 0,
+                coins: referrerPoints,
+                order: updatedOrder._id,
+                description: `Affiliate referral bonus: ${referrerPoints} coins (Order #${updatedOrder.orderId})`
+              });
+              await referrerLoyalty.save();
+
+              // Update tracking record
+              tracking.referrerPointsAwarded = true;
+              tracking.referrerPointsAwardedAt = new Date();
+              await tracking.save();
+            }
+          }
+        } catch (affiliateError) {
+          console.error('Error adding referrer affiliate loyalty points:', affiliateError);
+          // Don't fail the order update if affiliate points fail
+        }
       }
     }
 
@@ -1872,6 +2092,42 @@ exports.createGuestOrder = async (req, res) => {
     const populatedOrder = await Order.findById(order._id)
       .populate('items.product', 'title featuredImage slug');
 
+    // Handle affiliate tracking if affiliate code was used
+    if (order.affiliateOrder && order.affiliateOrder.affiliateCode) {
+      try {
+        // Find affiliate by code to get referrer user
+        const affiliate = await Affiliate.findOne({ 
+          affiliateCode: order.affiliateOrder.affiliateCode.toUpperCase() 
+        });
+
+        if (affiliate && affiliate.isActive) {
+          // Create affiliate tracking record
+          const trackingData = {
+            user: order.user || null, // Can be null for guest orders
+            mobileNumber: order.user ? null : (order.guestInfo?.phone || order.manualOrderInfo?.phone || null), // For guest orders
+            affiliateCode: order.affiliateOrder.affiliateCode.toUpperCase(),
+            order: order._id,
+            referrer: affiliate.user,
+            orderTotal: order.total,
+            affiliateDiscount: order.affiliateOrder.affiliateDiscount || 0
+          };
+
+          // Only create if we have either user or mobileNumber
+          if (trackingData.user || trackingData.mobileNumber) {
+            await AffiliateTracking.create(trackingData);
+          }
+
+          // Update affiliate stats
+          affiliate.totalPurchases += 1;
+          affiliate.totalPurchaseAmount += order.total;
+          await affiliate.save();
+        }
+      } catch (affiliateError) {
+        console.error('Error creating affiliate tracking:', affiliateError);
+        // Don't fail the order creation if affiliate tracking fails
+      }
+    }
+
     // Send SMS confirmation to guest if phone number is available (if enabled in settings)
     const guestPhone = order.guestInfo?.phone || order.manualOrderInfo?.phone || order.shippingAddress?.phone;
     if (guestPhone) {
@@ -2146,8 +2402,6 @@ exports.createManualOrder = async (req, res) => {
 exports.trackOrder = async (req, res) => {
   try {
     const { orderId } = req.params;
-
-    
     
     const order = await Order.findOne({ orderId, $or: [
       { isDeleted: { $exists: false } },
@@ -2164,6 +2418,39 @@ exports.trackOrder = async (req, res) => {
         message: 'Order not found',
       });
     }
+
+    
+    
+    
+    // Ensure loyaltyDiscount is properly read from order document
+    // Convert to number and handle undefined/null cases
+    const loyaltyDiscountValue = (order.loyaltyDiscount !== undefined && order.loyaltyDiscount !== null) 
+      ? Number(order.loyaltyDiscount) 
+      : 0;
+    
+    // Convert affiliateOrder values from string to number if needed
+    let affiliateOrderData = null;
+    if (order.affiliateOrder && order.affiliateOrder.affiliateCode) {
+      affiliateOrderData = {
+        affiliateCode: order.affiliateOrder.affiliateCode,
+        affiliateDiscount: order.affiliateOrder.affiliateDiscount !== undefined && order.affiliateOrder.affiliateDiscount !== null
+          ? Number(order.affiliateOrder.affiliateDiscount)
+          : 0,
+        purchaserDiscountType: order.affiliateOrder.purchaserDiscountType || null,
+        purchaserDiscountValue: order.affiliateOrder.purchaserDiscountValue !== undefined && order.affiliateOrder.purchaserDiscountValue !== null
+          ? Number(order.affiliateOrder.purchaserDiscountValue)
+          : 0,
+        purchaserLoyaltyPointsPerPurchase: order.affiliateOrder.purchaserLoyaltyPointsPerPurchase !== undefined && order.affiliateOrder.purchaserLoyaltyPointsPerPurchase !== null
+          ? Number(order.affiliateOrder.purchaserLoyaltyPointsPerPurchase)
+          : 0,
+        referrerLoyaltyPointsPerPurchase: order.affiliateOrder.referrerLoyaltyPointsPerPurchase !== undefined && order.affiliateOrder.referrerLoyaltyPointsPerPurchase !== null
+          ? Number(order.affiliateOrder.referrerLoyaltyPointsPerPurchase)
+          : 0
+      };
+      console.log('Converted affiliateOrderData:', affiliateOrderData);
+    }
+    
+    console.log('Calculated loyaltyDiscountValue:', loyaltyDiscountValue);
 
     // Create tracking timeline
     // Check if order has timestamps to determine if steps were completed
@@ -2232,29 +2519,36 @@ exports.trackOrder = async (req, res) => {
       });
     }
 
+    const responseData = {
+      order: {
+        orderId: order.orderId,
+        status: order.status,
+        total: order.total,
+        createdAt: order.createdAt,
+        shippingAddress: order.shippingAddress,
+        paymentMethod: order.paymentMethod,
+        paymentStatus: order.paymentStatus,
+        discount: order.discount !== undefined && order.discount !== null ? Number(order.discount) : 0,
+        upsellDiscount: order.upsellDiscount !== undefined && order.upsellDiscount !== null ? Number(order.upsellDiscount) : 0,
+        couponDiscount: order.couponDiscount !== undefined && order.couponDiscount !== null ? Number(order.couponDiscount) : 0,
+        shippingCost: order.shippingCost !== undefined && order.shippingCost !== null ? Number(order.shippingCost) : 0,
+        loyaltyDiscount: loyaltyDiscountValue,
+        coupon: order.coupon || null,
+        ...(affiliateOrderData && { affiliateOrder: affiliateOrderData })
+      },
+      trackingSteps
+    };
+    
+    console.log('Response data loyaltyDiscount:', responseData.order.loyaltyDiscount);
+    console.log('Response data affiliateOrder:', responseData.order.affiliateOrder);
+    console.log('=== TRACK ORDER DEBUG END ===');
+    
     return sendResponse({
       res,
       statusCode: 200,
       success: true,
       message: 'Order tracking information retrieved successfully',
-      data: {
-        order: {
-          orderId: order.orderId,
-          status: order.status,
-          total: order.total,
-          createdAt: order.createdAt,
-          shippingAddress: order.shippingAddress,
-          paymentMethod: order.paymentMethod,
-          paymentStatus: order.paymentStatus,
-          discount: order.discount || 0,
-          upsellDiscount: order.upsellDiscount || 0,
-          couponDiscount: order.couponDiscount || 0,
-          shippingCost: order.shippingCost || 0,
-          loyaltyDiscount: order.loyaltyDiscount || 0,
-          coupon: order.coupon || null
-        },
-        trackingSteps
-      }
+      data: responseData
     });
   } catch (error) {
     return sendResponse({

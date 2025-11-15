@@ -368,17 +368,23 @@ exports.getUsers = async (req, res) => {
     const search = req.query.search || '';
     const status = req.query.status || '';
     const role = req.query.role || '';
+    const excludeRole = req.query.excludeRole || ''; // Filter to exclude a role
+    const staffOnly = req.query.staffOnly === 'true'; // Filter for staff only (non-customers)
+    const customersOnly = req.query.customersOnly === 'true'; // Filter for customers only (role='customer' AND roleId is null)
     
     // Build filter object
     const filter = {};
+    const andConditions = [];
     
     // Search filter
     if (search) {
-      filter.$or = [
-        { name: { $regex: search, $options: 'i' } },
-        { email: { $regex: search, $options: 'i' } },
-        { phone: { $regex: search, $options: 'i' } }
-      ];
+      andConditions.push({
+        $or: [
+          { name: { $regex: search, $options: 'i' } },
+          { email: { $regex: search, $options: 'i' } },
+          { phone: { $regex: search, $options: 'i' } }
+        ]
+      });
     }
     
     // Status filter
@@ -386,13 +392,66 @@ exports.getUsers = async (req, res) => {
       filter.status = status;
     }
     
-    // Role filter
-    if (role) {
+    // Customers only filter (role='customer' AND roleId is null/doesn't exist)
+    if (customersOnly) {
+      andConditions.push({
+        $and: [
+          { role: 'customer' },
+          {
+            $or: [
+              { roleId: { $exists: false } },
+              { roleId: null }
+            ]
+          }
+        ]
+      });
+    } else if (staffOnly) {
+      // Staff only filter: users with roleId (ObjectId exists and not null)
+      // Staff = roleId exists AND roleId is not null AND roleId is ObjectId type (BSON type 7)
+      // Customer = roleId doesn't exist OR roleId is null
+      andConditions.push({
+        $and: [
+          { roleId: { $exists: true } },
+          { roleId: { $ne: null } },
+          { roleId: { $type: 7 } } // BSON type 7 = ObjectId
+        ]
+      });
+    } else if (excludeRole) {
+      // Exclude specific role
+      filter.role = { $ne: excludeRole };
+    } else if (role) {
+      // Role filter
       filter.role = role;
+    }
+    
+    // Combine all conditions with $and if needed
+    if (andConditions.length > 0) {
+      const baseFilter = { ...filter };
+      // Clear filter to rebuild
+      Object.keys(filter).forEach(key => delete filter[key]);
+      
+      // Build $and array - only include baseFilter if it has properties
+      if (Object.keys(baseFilter).length > 0) {
+        filter.$and = [baseFilter, ...andConditions];
+      } else {
+        // If baseFilter is empty, just use andConditions directly
+        if (andConditions.length === 1) {
+          // If only one condition, merge it directly
+          Object.assign(filter, andConditions[0]);
+        } else {
+          // Multiple conditions need $and
+          filter.$and = andConditions;
+        }
+      }
     }
     
     // Calculate skip value
     const skip = (page - 1) * limit;
+    
+    // Debug: Log the filter being used
+    if (staffOnly || customersOnly) {
+      console.log('Filter for', staffOnly ? 'staff' : 'customers', ':', JSON.stringify(filter, null, 2));
+    }
     
     // Get users with pagination
     const users = await User.find(filter)

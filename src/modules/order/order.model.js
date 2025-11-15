@@ -139,6 +139,16 @@ const orderSchema = new mongoose.Schema({
     isDeleted: { type: Boolean, default: false }, // Soft delete flag
     deletedAt: { type: Date }, // When the order was deleted
     deletedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }, // Who deleted the order
+    // Affiliate order information (snapshot at checkout time)
+    affiliateOrder: {
+        affiliateCode: { type: String }, // Affiliate code used
+        affiliateDiscount: { type: Number, default: 0 }, // Discount amount applied
+        // Settings snapshot at checkout time (stored as strings to preserve checkout-time values)
+        purchaserDiscountType: { type: String }, // 'percentage' or 'fixed'
+        purchaserDiscountValue: { type: String }, // Discount value as string
+        purchaserLoyaltyPointsPerPurchase: { type: String }, // Points for purchaser as string
+        referrerLoyaltyPointsPerPurchase: { type: String } // Points for referrer as string
+    }
 }, {
     timestamps: true,
 });

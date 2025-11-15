@@ -1,6 +1,8 @@
 const { Affiliate } = require('./affiliate.model');
+const { AffiliateTracking } = require('./affiliateTracking.model');
 const { User } = require('../user/user.model');
 const sendResponse = require('../../utils/sendResponse');
+const jwtService = require('../../services/jwtService');
 
 // Create or get affiliate for a user
 exports.createOrGetAffiliate = async (req, res) => {
@@ -187,6 +189,214 @@ exports.updateAffiliatePurchase = async (affiliateCode, purchaseAmount) => {
     }
   } catch (error) {
     console.error('Error updating affiliate purchase:', error);
+  }
+};
+
+// Check if user has already used an affiliate code
+exports.checkAffiliateCodeUsage = async (req, res) => {
+  try {
+    const { affiliateCode } = req.params;
+    let userId = null;
+
+    // Try to get user from token (optional auth)
+    try {
+      const authHeader = req.headers.authorization;
+      if (authHeader && authHeader.startsWith('Bearer ')) {
+        const token = authHeader.substring(7);
+        const decoded = jwtService.verifyToken(token);
+        if (decoded && decoded.userId) {
+          const user = await User.findById(decoded.userId).select('-password');
+          if (user && user.status === 'active') {
+            userId = user._id;
+          }
+        }
+      }
+    } catch (error) {
+      // Token is invalid or missing - treat as guest user
+      // This is fine, we'll continue without userId
+    }
+
+    if (!affiliateCode) {
+      return sendResponse({
+        res,
+        statusCode: 400,
+        success: false,
+        message: 'Affiliate code is required'
+      });
+    }
+
+    // If user is not logged in, return error (guest users should be checked separately by phone number)
+    if (!userId) {
+      return sendResponse({
+        res,
+        statusCode: 401,
+        success: false,
+        message: 'Authentication required to check affiliate code usage'
+      });
+    }
+
+    // Check if affiliate code exists and is active
+    const affiliate = await Affiliate.findOne({ 
+      affiliateCode: affiliateCode.toUpperCase(),
+      isActive: true
+    });
+
+    if (!affiliate) {
+      return sendResponse({
+        res,
+        statusCode: 404,
+        success: false,
+        message: 'Invalid affiliate code'
+      });
+    }
+
+    // Check if user is trying to use their own affiliate code
+    if (affiliate.user && affiliate.user.toString() === userId.toString()) {
+      return sendResponse({
+        res,
+        statusCode: 200,
+        success: true,
+        message: 'You cannot use your own affiliate link',
+        data: {
+          canUse: false,
+          reason: 'own_code',
+          message: 'You cannot use your own affiliate link'
+        }
+      });
+    }
+
+    // Check if user has already used this affiliate code
+    const existingTracking = await AffiliateTracking.findOne({
+      user: userId,
+      affiliateCode: affiliateCode.toUpperCase()
+    });
+
+    if (existingTracking) {
+      return sendResponse({
+        res,
+        statusCode: 200,
+        success: true,
+        message: 'User has already used this affiliate code',
+        data: {
+          canUse: false,
+          reason: 'already_used',
+          usedAt: existingTracking.createdAt
+        }
+      });
+    }
+
+    return sendResponse({
+      res,
+      statusCode: 200,
+      success: true,
+      message: 'Affiliate code is valid',
+      data: {
+        canUse: true,
+        reason: 'valid'
+      }
+    });
+  } catch (error) {
+    console.error('Error checking affiliate code usage:', error);
+    return sendResponse({
+      res,
+      statusCode: 500,
+      success: false,
+      message: error.message || 'Server error'
+    });
+  }
+};
+
+// Check if guest user (by phone number) has already used an affiliate code
+exports.checkGuestAffiliateCodeUsage = async (req, res) => {
+  try {
+    const { affiliateCode, phoneNumber } = req.body;
+
+    if (!affiliateCode) {
+      return sendResponse({
+        res,
+        statusCode: 400,
+        success: false,
+        message: 'Affiliate code is required'
+      });
+    }
+
+    if (!phoneNumber) {
+      return sendResponse({
+        res,
+        statusCode: 400,
+        success: false,
+        message: 'Phone number is required'
+      });
+    }
+
+    // Check if guest user has already used this affiliate code by phone number
+    const existingTracking = await AffiliateTracking.findOne({
+      mobileNumber: phoneNumber,
+      affiliateCode: affiliateCode.toUpperCase()
+    });
+
+    if (existingTracking) {
+      return sendResponse({
+        res,
+        statusCode: 200,
+        success: true,
+        message: 'Guest user has already used this affiliate code',
+        data: {
+          canUse: false,
+          reason: 'already_used',
+          usedAt: existingTracking.createdAt
+        }
+      });
+    }
+
+    // Check if affiliate code exists and is active
+    const affiliate = await Affiliate.findOne({ 
+      affiliateCode: affiliateCode.toUpperCase(),
+      isActive: true
+    }).populate('user', 'phone');
+
+    if (!affiliate) {
+      return sendResponse({
+        res,
+        statusCode: 404,
+        success: false,
+        message: 'Invalid affiliate code'
+      });
+    }
+
+    // Check if guest user is trying to use their own affiliate code (by phone number)
+    if (affiliate.user && affiliate.user.phone && phoneNumber && affiliate.user.phone === phoneNumber) {
+      return sendResponse({
+        res,
+        statusCode: 200,
+        success: true,
+        message: 'You cannot use your own affiliate link',
+        data: {
+          canUse: false,
+          reason: 'own_code',
+          message: 'You cannot use your own affiliate link'
+        }
+      });
+    }
+
+    return sendResponse({
+      res,
+      statusCode: 200,
+      success: true,
+      message: 'Affiliate code is valid',
+      data: {
+        canUse: true,
+        reason: 'valid'
+      }
+    });
+  } catch (error) {
+    console.error('Error checking guest affiliate code usage:', error);
+    return sendResponse({
+      res,
+      statusCode: 500,
+      success: false,
+      message: error.message || 'Server error'
+    });
   }
 };
 
