@@ -18,6 +18,7 @@ const allowedOrigins = [
     'http://64.227.133.212',
     'http://forpink.com',
     'https://forpink.com',
+    'https://api.forpink.com',
     'http://64.227.133.212:3000'
 ];
 
@@ -48,6 +49,7 @@ app.use(cors({
         'http://forpink.com',
         'https://forpink.com',
         'http://64.227.133.212:3000',
+        'https://api.forpink.com',
     ],
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
