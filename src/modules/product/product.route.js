@@ -9,6 +9,7 @@ router.get('/featured', productController.getFeaturedProducts);
 router.get('/discounted', productController.getDiscountedProducts);
 router.get('/new-arrivals', productController.getNewArrivals);
 router.get('/bestselling', productController.getBestsellingProducts);
+router.get('/random', productController.getRandomProducts);
 router.get('/product-videos', productController.getProductVideos);
 router.get('/search', productController.searchProducts);
 router.get('/filters', productController.getAvailableFilters);

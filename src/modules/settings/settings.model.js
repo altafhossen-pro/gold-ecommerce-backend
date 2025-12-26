@@ -113,6 +113,18 @@ const settingsSchema = new mongoose.Schema({
       default: true
     }
   },
+
+  // Steadfast Courier Settings
+  steadfastSettings: {
+    apiKey: {
+      type: String,
+      default: ''
+    },
+    apiSecret: {
+      type: String,
+      default: ''
+    }
+  },
   
   // Admin who last updated
   updatedBy: { 

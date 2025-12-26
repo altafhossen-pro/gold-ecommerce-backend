@@ -1,6 +1,13 @@
 const { Product } = require('./product.model');
 const { StockTracking } = require('../inventory/stockTracking.model');
 const sendResponse = require('../../utils/sendResponse');
+const mongoose = require('mongoose');
+
+// Helper function to sanitize slug (remove leading/trailing hyphens)
+const sanitizeSlug = (slug) => {
+  if (!slug || typeof slug !== 'string') return slug;
+  return slug.replace(/^-+|-+$/g, ''); // Remove leading and trailing hyphens
+};
 
 // Helper for pagination and filtering
 const getPaginatedProducts = async (filter, req, res, message) => {
@@ -63,6 +70,11 @@ const getPaginatedProducts = async (filter, req, res, message) => {
 
 exports.createProduct = async (req, res) => {
   try {
+    // Sanitize slug to remove leading/trailing hyphens
+    if (req.body.slug) {
+      req.body.slug = sanitizeSlug(req.body.slug);
+    }
+    
     const product = new Product(req.body);
     await product.save();
 
@@ -242,6 +254,66 @@ exports.getNewArrivals = async (req, res) => {
 
 exports.getBestsellingProducts = async (req, res) => {
   return getPaginatedProducts({ isBestselling: true }, req, res, 'Bestselling products fetched successfully');
+};
+
+// Get random products for "Just for you" section
+exports.getRandomProducts = async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 5;
+    const excludeIds = req.query.exclude ? req.query.exclude.split(',') : [];
+    
+    // Build match filter
+    const matchFilter = {
+      isActive: true,
+      status: 'published'
+    };
+    
+    // Exclude already loaded product IDs
+    if (excludeIds.length > 0) {
+      matchFilter._id = {
+        $nin: excludeIds.map(id => new mongoose.Types.ObjectId(id))
+      };
+    }
+    
+    // Use aggregation with $sample to get random products
+    const products = await Product.aggregate([
+      {
+        $match: matchFilter
+      },
+      {
+        $sample: { size: limit }
+      },
+      {
+        $lookup: {
+          from: 'categories',
+          localField: 'category',
+          foreignField: '_id',
+          as: 'category'
+        }
+      },
+      {
+        $unwind: {
+          path: '$category',
+          preserveNullAndEmptyArrays: true
+        }
+      }
+    ]);
+
+    return sendResponse({
+      res,
+      statusCode: 200,
+      success: true,
+      message: 'Random products fetched successfully',
+      data: products,
+    });
+  } catch (error) {
+    return sendResponse({
+      res,
+      statusCode: 500,
+      success: false,
+      message: error.message || 'Server error',
+    });
+  }
 };
 
 // Get products with videos (only products that have at least 1 video)
@@ -689,6 +761,11 @@ exports.updateProduct = async (req, res) => {
   try {
     const { id } = req.params;
     const updates = req.body;
+    
+    // Sanitize slug to remove leading/trailing hyphens
+    if (updates.slug) {
+      updates.slug = sanitizeSlug(updates.slug);
+    }
     
     // Get the original product to compare stock changes
     const originalProduct = await Product.findById(id);

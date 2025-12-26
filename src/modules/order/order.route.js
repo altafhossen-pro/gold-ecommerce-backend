@@ -16,11 +16,12 @@ router.get('/admin/list', verifyToken, verifyTokenAdmin, checkPermission('order'
 router.get('/user/:orderId', verifyToken, orderController.getUserOrderById);
 router.get('/track/:orderId', orderController.trackOrder);
 router.get('/search-by-phone/:phoneNumber', verifyToken, verifyTokenAdmin, orderController.searchOrdersByPhone);
-router.get('/get-customer-info/:phoneNumber', verifyToken, verifyTokenAdmin, orderController.getCustomerInfoByPhone);
+router.get('/get-customer-info/:phoneNumber', orderController.getCustomerInfoByPhone);
 router.get('/:id', orderController.getOrderById);
 router.patch('/:id', orderController.updateOrder);
 router.put('/:id/comprehensive', verifyToken, verifyTokenAdmin, orderController.updateOrderComprehensive);
 router.delete('/:id', verifyToken, verifyTokenAdmin, checkPermission('order', 'delete'), orderController.deleteOrder);
 router.post('/update-total-sold', orderController.updateTotalSold);
+router.post('/:id/add-to-steadfast', verifyToken, verifyTokenAdmin, checkPermission('order', 'update'), orderController.addOrderToSteadfast);
 
 module.exports = router;

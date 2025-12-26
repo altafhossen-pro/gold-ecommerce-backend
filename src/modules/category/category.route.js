@@ -8,6 +8,7 @@ router.get('/main', categoryController.getMainCategories);
 router.get('/main/paginated', categoryController.getPaginatedMainCategories);
 router.get('/homepage', categoryController.getHomepageCategories);
 router.get('/featured', categoryController.getFeaturedCategories);
+router.get('/megamenu', categoryController.getCategoriesForMegamenu);
 router.get('/:id', categoryController.getCategoryById);
 router.put('/:id', categoryController.updateCategory);
 router.delete('/:id', categoryController.deleteCategory);

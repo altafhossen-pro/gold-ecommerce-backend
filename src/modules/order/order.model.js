@@ -148,7 +148,11 @@ const orderSchema = new mongoose.Schema({
         purchaserDiscountValue: { type: String }, // Discount value as string
         purchaserLoyaltyPointsPerPurchase: { type: String }, // Points for purchaser as string
         referrerLoyaltyPointsPerPurchase: { type: String } // Points for referrer as string
-    }
+    },
+    // Steadfast Courier Integration
+    isAddedIntoSteadfast: { type: Boolean, default: false },
+    steadfastConsignmentId: { type: String },
+    steadfastTrackingCode: { type: String }
 }, {
     timestamps: true,
 });

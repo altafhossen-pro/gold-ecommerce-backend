@@ -146,9 +146,6 @@ const sendSMS = async (phone, message) => {
     // Parse the response to get status code
     const statusCode = parseStatusCode(response.data);
 
-    // Log response for debugging
-    console.log('SMS API Response:', response.data, 'Status Code:', statusCode);
-
     // Check if SMS was sent successfully (202 = SMS Submitted Successfully)
     if (statusCode === 202) {
       return {

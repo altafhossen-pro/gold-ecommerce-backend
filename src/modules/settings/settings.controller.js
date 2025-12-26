@@ -357,3 +357,66 @@ exports.updateAffiliateSettings = async (req, res) => {
     });
   }
 };
+
+// Get steadfast settings
+exports.getSteadfastSettings = async (req, res) => {
+  try {
+    let settings = await Settings.findOne();
+    
+    // If no settings exist, create default settings
+    if (!settings) {
+      settings = new Settings();
+      await settings.save();
+    }
+    
+    return sendResponse({
+      res,
+      statusCode: 200,
+      success: true,
+      message: 'Steadfast settings retrieved successfully',
+      data: settings.steadfastSettings || {}
+    });
+  } catch (error) {
+    return sendResponse({
+      res,
+      statusCode: 500,
+      success: false,
+      message: error.message || 'Server error'
+    });
+  }
+};
+
+// Update steadfast settings
+exports.updateSteadfastSettings = async (req, res) => {
+  try {
+    const steadfastData = req.body;
+    
+    let settings = await Settings.findOne();
+    
+    if (!settings) {
+      // Create new settings if none exist
+      settings = new Settings();
+    }
+    
+    // Update only steadfast settings
+    Object.assign(settings.steadfastSettings, steadfastData);
+    settings.updatedBy = req.user._id;
+    
+    await settings.save();
+    
+    return sendResponse({
+      res,
+      statusCode: 200,
+      success: true,
+      message: 'Steadfast settings updated successfully',
+      data: settings.steadfastSettings
+    });
+  } catch (error) {
+    return sendResponse({
+      res,
+      statusCode: 500,
+      success: false,
+      message: error.message || 'Server error'
+    });
+  }
+};

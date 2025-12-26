@@ -13,6 +13,7 @@ const { sendOrderConfirmationEmail } = require('../../utils/email');
 const { sendCustomSMS } = require('../../utils/smsService');
 const { Affiliate } = require('../affiliate/affiliate.model');
 const { AffiliateTracking } = require('../affiliate/affiliateTracking.model');
+const steadfastService = require('../steadfast/steadfast.service');
 
 exports.createOrder = async (req, res) => {
   try {
@@ -26,7 +27,7 @@ exports.createOrder = async (req, res) => {
 
     // Validate address IDs if provided
     if (orderData.shippingAddress) {
-      
+
 
       // Validate division ID if provided
       if (orderData.shippingAddress.divisionId) {
@@ -170,7 +171,7 @@ exports.createOrder = async (req, res) => {
     // Handle loyalty points redemption after order creation
     if (orderData.loyaltyPointsUsed && orderData.loyaltyPointsUsed > 0) {
       try {
-        
+
         const loyalty = await Loyalty.findOne({ user: req.user._id });
 
         if (loyalty) {
@@ -198,7 +199,7 @@ exports.createOrder = async (req, res) => {
       for (const item of order.items) {
         let previousStock = 0;
         let newStock = 0;
-        
+
         // Update variant stock if variant exists
         if (item.variant && item.variant.sku) {
           // Get product to find variant and previous stock
@@ -209,7 +210,7 @@ exports.createOrder = async (req, res) => {
               previousStock = variant.stockQuantity || 0;
             }
           }
-          
+
           // Update variant stock
           const result = await Product.findOneAndUpdate(
             {
@@ -225,11 +226,11 @@ exports.createOrder = async (req, res) => {
           if (result) {
             const updatedVariant = result.variants.find(v => v.sku === item.variant.sku);
             newStock = updatedVariant ? updatedVariant.stockQuantity : 0;
-            
+
             // Update totalStock
             const updatedTotalStock = result.variants.reduce((total, variant) => total + (variant.stockQuantity || 0), 0);
             await Product.findByIdAndUpdate(item.product, { totalStock: updatedTotalStock });
-            
+
             // Create stock tracking record for sold items
             const stockTracking = new StockTracking({
               product: item.product,
@@ -254,17 +255,17 @@ exports.createOrder = async (req, res) => {
           if (product) {
             previousStock = product.totalStock || 0;
           }
-          
+
           // Update main product stock
           const result = await Product.findByIdAndUpdate(
             item.product,
             { $inc: { totalStock: -item.quantity } },
             { new: true }
           );
-          
+
           if (result) {
             newStock = result.totalStock || 0;
-            
+
             // Create stock tracking record for sold items
             const stockTracking = new StockTracking({
               product: item.product,
@@ -291,8 +292,8 @@ exports.createOrder = async (req, res) => {
     if (order.affiliateOrder && order.affiliateOrder.affiliateCode) {
       try {
         // Find affiliate by code to get referrer user
-        const affiliate = await Affiliate.findOne({ 
-          affiliateCode: order.affiliateOrder.affiliateCode.toUpperCase() 
+        const affiliate = await Affiliate.findOne({
+          affiliateCode: order.affiliateOrder.affiliateCode.toUpperCase()
         });
 
         if (affiliate && affiliate.isActive) {
@@ -468,14 +469,14 @@ exports.getAdminOrders = async (req, res) => {
       // If individual filters, use them
       const emailSearch = search ? (search.includes('@') ? search : null) : email;
       const phoneSearch = search ? search : phone;
-      
+
       const userQuery = {};
-      
+
       // Email search (only if contains @ or if email parameter provided)
       if (emailSearch) {
         userQuery.email = { $regex: emailSearch, $options: 'i' };
       }
-      
+
       // Phone search (always try phone search for unified search, or if phone parameter provided)
       // But don't add phone search if we're searching for email
       if (phoneSearch && !emailSearch) {
@@ -494,7 +495,7 @@ exports.getAdminOrders = async (req, res) => {
         const users = await User.find(userQuery).select('_id');
         matchingUserIds = users.map(u => u._id);
         if (searchTerm) {
-          console.log('Matching user IDs found:', matchingUserIds.length);
+
         }
       }
     }
@@ -572,21 +573,21 @@ exports.getAdminOrders = async (req, res) => {
     // Date range filter
     if (startDate || endDate) {
       const dateFilter = {};
-      
+
       if (startDate) {
         // Parse start date - set to beginning of day (00:00:00)
         const start = new Date(startDate);
         start.setHours(0, 0, 0, 0);
         dateFilter.$gte = start;
       }
-      
+
       if (endDate) {
         // Parse end date - set to end of day (23:59:59)
         const end = new Date(endDate);
         end.setHours(23, 59, 59, 999);
         dateFilter.$lte = end;
       }
-      
+
       if (Object.keys(dateFilter).length > 0) {
         filterConditions.push({ createdAt: dateFilter });
       }
@@ -614,21 +615,15 @@ exports.getAdminOrders = async (req, res) => {
       finalFilter = { $and: finalConditions };
     }
 
-    // Debug logging
-    if (searchTerm) {
-      console.log('Search term:', searchTerm);
-      console.log('Final filter:', JSON.stringify(finalFilter, null, 2));
-    }
+
 
     // Calculate skip value for pagination
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
     // Get total count for pagination (before filtering by user.email which needs populate)
     const total = await Order.countDocuments(finalFilter);
-    
-    if (searchTerm) {
-      console.log('Total orders found:', total);
-    }
+
+
 
     // Get orders with pagination
     let orders = await Order.find(finalFilter)
@@ -639,14 +634,7 @@ exports.getAdminOrders = async (req, res) => {
       .skip(skip)
       .limit(parseInt(limit));
 
-    if (searchTerm) {
-      console.log('Orders found before email/phone filtering:', orders.length);
-      if (orders.length > 0) {
-        console.log('First order orderId:', orders[0].orderId);
-        console.log('First order user email:', orders[0].user?.email);
-        console.log('First order user phone:', orders[0].user?.phone);
-      }
-    }
+
 
     // Additional filter by user.email if search term was provided (for exact match after populate)
     // Only filter if search term looks like email (contains @) or if email parameter was provided
@@ -658,18 +646,13 @@ exports.getAdminOrders = async (req, res) => {
         const guestEmail = order.guestInfo?.email?.toLowerCase() || '';
         const manualEmail = order.manualOrderInfo?.email?.toLowerCase() || '';
         const matches = userEmail.includes(emailLower) || guestEmail.includes(emailLower) || manualEmail.includes(emailLower);
-        if (searchTerm && !matches) {
-          console.log('Order not matching email:', order.orderId, 'userEmail:', userEmail, 'guestEmail:', guestEmail);
-        }
+
         return matches;
       });
       // Always use filtered results if email search was provided (even if empty, to show no results)
       orders = filteredByEmail;
-      if (searchTerm) {
-        console.log('Filtered by email, remaining orders:', orders.length);
-      }
     }
-    
+
     // Additional filter by user.phone if search term was provided (for exact match after populate)
     // Only filter if search term doesn't look like email and phone search is needed
     // Skip if we already filtered by email
@@ -685,15 +668,11 @@ exports.getAdminOrders = async (req, res) => {
       // Only replace orders if we found matches, otherwise keep original (might be orderId match)
       if (filteredByPhone.length > 0) {
         orders = filteredByPhone;
-        if (searchTerm) {
-          console.log('Filtered by phone, remaining orders:', orders.length);
-        }
+
       }
     }
 
-    if (searchTerm) {
-      console.log('Final orders count:', orders.length);
-    }
+
 
     // Note: If we filtered after populate, the total count might not match exactly
     // For better accuracy, we could recalculate, but for now using the original total
@@ -767,8 +746,6 @@ exports.getUserOrderById = async (req, res) => {
     const { orderId } = req.params;
 
     const userId = req.user._id;
-    console.log(userId, "altaf userId")
-    console.log(orderId, "altaf orderId")
 
     const order = await Order.findOne({
       orderId,
@@ -780,7 +757,6 @@ exports.getUserOrderById = async (req, res) => {
     })
       .populate('items.product', 'title featuredImage slug description')
       .populate('user', 'name email phone');
-    console.log(order, "altaf order")
 
     if (!order) {
       return sendResponse({
@@ -956,7 +932,7 @@ exports.updateOrder = async (req, res) => {
             if (result) {
               const updatedVariant = result.variants.find(v => v.sku === item.variant.sku);
               newStock = updatedVariant ? updatedVariant.stockQuantity : 0;
-              
+
               const updatedTotalStock = result.variants.reduce((total, variant) => total + (variant.stockQuantity || 0), 0);
 
               // Update totalStock and save to trigger any middleware
@@ -988,17 +964,17 @@ exports.updateOrder = async (req, res) => {
             if (product) {
               previousStock = product.totalStock || 0;
             }
-            
+
             // Update main product stock
             const result = await Product.findByIdAndUpdate(
               item.product,
               { $inc: { totalStock: -item.quantity } },
               { new: true }
             );
-            
+
             if (result) {
               newStock = result.totalStock || 0;
-              
+
               // Create stock tracking record for sold items
               const stockTracking = new StockTracking({
                 product: item.product,
@@ -1032,7 +1008,7 @@ exports.updateOrder = async (req, res) => {
             if (returnQuantity > 0) {
               let previousStock = 0;
               let newStock = 0;
-              
+
               // Update variant stock if variant exists
               if (item.variant && item.variant.sku) {
                 // Get product to find variant and previous stock
@@ -1043,7 +1019,7 @@ exports.updateOrder = async (req, res) => {
                     previousStock = variant.stockQuantity || 0;
                   }
                 }
-                
+
                 // Find variant by SKU and add stock back
                 const result = await Product.findOneAndUpdate(
                   {
@@ -1060,14 +1036,14 @@ exports.updateOrder = async (req, res) => {
                 if (result) {
                   const updatedVariant = result.variants.find(v => v.sku === item.variant.sku);
                   newStock = updatedVariant ? updatedVariant.stockQuantity : 0;
-                  
+
                   const updatedTotalStock = result.variants.reduce((total, variant) => total + (variant.stockQuantity || 0), 0);
 
                   // Update totalStock and save to trigger any middleware
                   const product = await Product.findById(item.product);
                   product.totalStock = updatedTotalStock;
                   await product.save();
-                  
+
                   // Create stock tracking record for returned items (adjusts sold count)
                   const stockTracking = new StockTracking({
                     product: item.product,
@@ -1092,17 +1068,17 @@ exports.updateOrder = async (req, res) => {
                 if (product) {
                   previousStock = product.totalStock || 0;
                 }
-                
+
                 // Update main product stock
                 const result = await Product.findByIdAndUpdate(
                   item.product,
                   { $inc: { totalStock: +returnQuantity } },
                   { new: true }
                 );
-                
+
                 if (result) {
                   newStock = result.totalStock || 0;
-                  
+
                   // Create stock tracking record for returned items (adjusts sold count)
                   const stockTracking = new StockTracking({
                     product: item.product,
@@ -1126,7 +1102,7 @@ exports.updateOrder = async (req, res) => {
           for (const item of order.items) {
             let previousStock = 0;
             let newStock = 0;
-            
+
             // Update variant stock if variant exists
             if (item.variant && item.variant.sku) {
               // Get product to find variant and previous stock
@@ -1137,7 +1113,7 @@ exports.updateOrder = async (req, res) => {
                   previousStock = variant.stockQuantity || 0;
                 }
               }
-              
+
               // Find variant by SKU and add stock back
               const result = await Product.findOneAndUpdate(
                 {
@@ -1154,14 +1130,14 @@ exports.updateOrder = async (req, res) => {
               if (result) {
                 const updatedVariant = result.variants.find(v => v.sku === item.variant.sku);
                 newStock = updatedVariant ? updatedVariant.stockQuantity : 0;
-                
+
                 const updatedTotalStock = result.variants.reduce((total, variant) => total + (variant.stockQuantity || 0), 0);
 
                 // Update totalStock and save to trigger any middleware
                 const product = await Product.findById(item.product);
                 product.totalStock = updatedTotalStock;
                 await product.save();
-                
+
                 // Create stock tracking record for returned items (adjusts sold count)
                 const stockTracking = new StockTracking({
                   product: item.product,
@@ -1186,17 +1162,17 @@ exports.updateOrder = async (req, res) => {
               if (product) {
                 previousStock = product.totalStock || 0;
               }
-              
+
               // Update main product stock
               const result = await Product.findByIdAndUpdate(
                 item.product,
                 { $inc: { totalStock: +item.quantity } },
                 { new: true }
               );
-              
+
               if (result) {
                 newStock = result.totalStock || 0;
-                
+
                 // Create stock tracking record for returned items (adjusts sold count)
                 const stockTracking = new StockTracking({
                   product: item.product,
@@ -1255,7 +1231,7 @@ exports.updateOrder = async (req, res) => {
             // Check if points already awarded (to avoid duplicate awards)
             const tracking = await AffiliateTracking.findOne({ order: order._id });
             if (tracking && tracking.purchaserPointsAwarded) {
-              console.log('Purchaser loyalty points already awarded for this order');
+              // Purchaser loyalty points already awarded for this order
             } else {
               // Add points
               purchaserLoyalty.coins += purchaserPoints;
@@ -1681,7 +1657,7 @@ exports.updateOrderComprehensive = async (req, res) => {
             // Check if points already awarded (to avoid duplicate awards)
             const tracking = await AffiliateTracking.findOne({ order: updatedOrder._id });
             if (tracking && tracking.purchaserPointsAwarded) {
-              
+
             } else {
               // Add points
               purchaserLoyalty.coins += purchaserPoints;
@@ -2004,7 +1980,7 @@ exports.createGuestOrder = async (req, res) => {
     for (const item of order.items) {
       let previousStock = 0;
       let newStock = 0;
-      
+
       if (item.variant && item.variant.sku) {
         // Get product to find variant and previous stock
         const product = await Product.findById(item.product);
@@ -2014,7 +1990,7 @@ exports.createGuestOrder = async (req, res) => {
             previousStock = variant.stockQuantity || 0;
           }
         }
-        
+
         // Update variant stock
         const result = await Product.findOneAndUpdate(
           {
@@ -2030,11 +2006,11 @@ exports.createGuestOrder = async (req, res) => {
         if (result) {
           const updatedVariant = result.variants.find(v => v.sku === item.variant.sku);
           newStock = updatedVariant ? updatedVariant.stockQuantity : 0;
-          
+
           // Update totalStock
           const updatedTotalStock = result.variants.reduce((total, variant) => total + (variant.stockQuantity || 0), 0);
           await Product.findByIdAndUpdate(item.product, { totalStock: updatedTotalStock });
-          
+
           // Create stock tracking record for sold items
           const stockTracking = new StockTracking({
             product: item.product,
@@ -2059,17 +2035,17 @@ exports.createGuestOrder = async (req, res) => {
         if (product) {
           previousStock = product.totalStock || 0;
         }
-        
+
         // Update main product stock
         const result = await Product.findByIdAndUpdate(
           item.product,
           { $inc: { totalStock: -item.quantity } },
           { new: true }
         );
-        
+
         if (result) {
           newStock = result.totalStock || 0;
-          
+
           // Create stock tracking record for sold items
           const stockTracking = new StockTracking({
             product: item.product,
@@ -2096,8 +2072,8 @@ exports.createGuestOrder = async (req, res) => {
     if (order.affiliateOrder && order.affiliateOrder.affiliateCode) {
       try {
         // Find affiliate by code to get referrer user
-        const affiliate = await Affiliate.findOne({ 
-          affiliateCode: order.affiliateOrder.affiliateCode.toUpperCase() 
+        const affiliate = await Affiliate.findOne({
+          affiliateCode: order.affiliateOrder.affiliateCode.toUpperCase()
         });
 
         if (affiliate && affiliate.isActive) {
@@ -2138,10 +2114,10 @@ exports.createGuestOrder = async (req, res) => {
           const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
           const trackingUrl = `${frontendUrl}/tracking?orderId=${order.orderId}`;
           const totalAmount = order.total.toFixed(2);
-          
+
           // Professional short SMS message
           const smsMessage = `Forpink: Order #${order.orderId} confirmed. Total: ৳${totalAmount}. Track: ${trackingUrl}`;
-          
+
           // Send SMS asynchronously (don't wait for it to complete)
           sendCustomSMS(guestPhone, smsMessage).catch(smsError => {
             console.error('Failed to send order confirmation SMS:', smsError);
@@ -2366,10 +2342,10 @@ exports.createManualOrder = async (req, res) => {
           const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
           const trackingUrl = `${frontendUrl}/tracking?orderId=${order.orderId}`;
           const totalAmount = order.total.toFixed(2);
-          
+
           // Professional short SMS message
           const smsMessage = `Forpink: Order #${order.orderId} confirmed. Total: ৳${totalAmount}. Track: ${trackingUrl}`;
-          
+
           // Send SMS asynchronously (don't wait for it to complete)
           sendCustomSMS(guestInfo.phone, smsMessage).catch(smsError => {
             console.error('Failed to send order confirmation SMS:', smsError);
@@ -2402,11 +2378,13 @@ exports.createManualOrder = async (req, res) => {
 exports.trackOrder = async (req, res) => {
   try {
     const { orderId } = req.params;
-    
-    const order = await Order.findOne({ orderId, $or: [
-      { isDeleted: { $exists: false } },
-      { isDeleted: false }
-    ] })
+
+    const order = await Order.findOne({
+      orderId, $or: [
+        { isDeleted: { $exists: false } },
+        { isDeleted: false }
+      ]
+    })
       .populate('user', 'name email phone')
       .populate('items.product', 'title featuredImage slug');
 
@@ -2419,15 +2397,15 @@ exports.trackOrder = async (req, res) => {
       });
     }
 
-    
-    
-    
+
+
+
     // Ensure loyaltyDiscount is properly read from order document
     // Convert to number and handle undefined/null cases
-    const loyaltyDiscountValue = (order.loyaltyDiscount !== undefined && order.loyaltyDiscount !== null) 
-      ? Number(order.loyaltyDiscount) 
+    const loyaltyDiscountValue = (order.loyaltyDiscount !== undefined && order.loyaltyDiscount !== null)
+      ? Number(order.loyaltyDiscount)
       : 0;
-    
+
     // Convert affiliateOrder values from string to number if needed
     let affiliateOrderData = null;
     if (order.affiliateOrder && order.affiliateOrder.affiliateCode) {
@@ -2447,10 +2425,7 @@ exports.trackOrder = async (req, res) => {
           ? Number(order.affiliateOrder.referrerLoyaltyPointsPerPurchase)
           : 0
       };
-      console.log('Converted affiliateOrderData:', affiliateOrderData);
     }
-    
-    console.log('Calculated loyaltyDiscountValue:', loyaltyDiscountValue);
 
     // Create tracking timeline
     // Check if order has timestamps to determine if steps were completed
@@ -2458,7 +2433,7 @@ exports.trackOrder = async (req, res) => {
     const hasProcessingTimestamp = !!order.statusTimestamps.processing;
     const hasShippedTimestamp = !!order.statusTimestamps.shipped;
     const hasDeliveredTimestamp = !!order.statusTimestamps.delivered;
-    
+
     const trackingSteps = [
       {
         status: 'pending',
@@ -2538,11 +2513,7 @@ exports.trackOrder = async (req, res) => {
       },
       trackingSteps
     };
-    
-    console.log('Response data loyaltyDiscount:', responseData.order.loyaltyDiscount);
-    console.log('Response data affiliateOrder:', responseData.order.affiliateOrder);
-    console.log('=== TRACK ORDER DEBUG END ===');
-    
+
     return sendResponse({
       res,
       statusCode: 200,
@@ -2597,13 +2568,26 @@ exports.searchOrdersByPhone = async (req, res) => {
 
 // Get customer info by phone number 
 // Address comes ONLY from last order's shippingAddress (not from user table)
+// Public API - no authentication required (for guest checkout)
 exports.getCustomerInfoByPhone = async (req, res) => {
   try {
     const { phoneNumber } = req.params;
 
+    // Token is optional - if present, we can use it for additional features, but not required
+    // const token = req.headers.authorization?.split(' ')[1];
+
     let customerInfo = {
       name: '',
-      address: ''
+      address: '', // Full address string for backward compatibility
+      street: '', // Street address only
+      division: '',
+      divisionId: '',
+      district: '',
+      districtId: '',
+      upazila: '',
+      upazilaId: '',
+      area: '',
+      areaId: ''
     };
 
     // Find user for name only (not for address)
@@ -2648,7 +2632,18 @@ exports.getCustomerInfoByPhone = async (req, res) => {
 
       // Get address from shippingAddress (priority: shippingAddress > deliveryAddress)
       if (latestOrder.shippingAddress) {
-        // Build full address from shippingAddress object
+        // Get structured address details
+        customerInfo.street = latestOrder.shippingAddress.street || '';
+        customerInfo.division = latestOrder.shippingAddress.division || '';
+        customerInfo.divisionId = latestOrder.shippingAddress.divisionId || '';
+        customerInfo.district = latestOrder.shippingAddress.district || '';
+        customerInfo.districtId = latestOrder.shippingAddress.districtId || '';
+        customerInfo.upazila = latestOrder.shippingAddress.upazila || '';
+        customerInfo.upazilaId = latestOrder.shippingAddress.upazilaId || '';
+        customerInfo.area = latestOrder.shippingAddress.area || '';
+        customerInfo.areaId = latestOrder.shippingAddress.areaId || '';
+
+        // Build full address string for backward compatibility
         const addrParts = [
           latestOrder.shippingAddress.street,
           latestOrder.shippingAddress.city,
@@ -2662,10 +2657,13 @@ exports.getCustomerInfoByPhone = async (req, res) => {
         customerInfo.address = addrParts.length > 0 ? addrParts.join(', ') : '';
       } else if (latestOrder.deliveryAddress) {
         customerInfo.address = latestOrder.deliveryAddress;
+        customerInfo.street = latestOrder.deliveryAddress; // Use full address as street if no shippingAddress
       } else if (latestOrder.manualOrderInfo?.address) {
         customerInfo.address = latestOrder.manualOrderInfo.address;
+        customerInfo.street = latestOrder.manualOrderInfo.address;
       } else if (latestOrder.guestInfo?.address) {
         customerInfo.address = latestOrder.guestInfo.address;
+        customerInfo.street = latestOrder.guestInfo.address;
       }
     }
 
@@ -2683,6 +2681,230 @@ exports.getCustomerInfoByPhone = async (req, res) => {
       success: false,
       message: 'Error retrieving customer info',
       error: error.message
+    });
+  }
+};
+
+// Add order to Steadfast
+exports.addOrderToSteadfast = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Get the order
+    const order = await Order.findById(id).populate('items.product').populate('user', 'name email phone');
+    if (!order) {
+      return sendResponse({
+        res,
+        statusCode: 404,
+        success: false,
+        message: 'Order not found',
+      });
+    }
+
+    // Note: Duplicate order validation is handled on the frontend with captcha confirmation
+    // Backend allows adding orders even if already added to Steadfast to support duplicate entries
+
+    // Get customer information
+    let recipientName = '';
+    let recipientPhone = '';
+    let recipientEmail = '';
+    let recipientAddress = '';
+
+    // Get customer info from different sources
+    if (order.user && order.user.name) {
+      recipientName = order.user.name;
+    } else if (order.guestInfo?.name) {
+      recipientName = order.guestInfo.name;
+    } else if (order.manualOrderInfo?.name) {
+      recipientName = order.manualOrderInfo.name;
+    }
+
+    if (order.user && order.user.phone) {
+      recipientPhone = order.user.phone;
+    } else if (order.guestInfo?.phone) {
+      recipientPhone = order.guestInfo.phone;
+    } else if (order.manualOrderInfo?.phone) {
+      recipientPhone = order.manualOrderInfo.phone;
+    }
+
+    if (order.user && order.user.email) {
+      recipientEmail = order.user.email;
+    } else if (order.guestInfo?.email) {
+      recipientEmail = order.guestInfo.email;
+    } else if (order.manualOrderInfo?.email) {
+      recipientEmail = order.manualOrderInfo.email;
+    }
+
+    // Build address string from shippingAddress
+    // street is mandatory, area/upazila/district/division are optional
+    if (order.shippingAddress) {
+      // Validate street (mandatory)
+      if (!order.shippingAddress.street || order.shippingAddress.street.trim() === '') {
+        return sendResponse({
+          res,
+          statusCode: 400,
+          success: false,
+          message: 'Street address is required',
+        });
+      }
+
+      const addressParts = [];
+      // Street is mandatory - must add
+      addressParts.push(order.shippingAddress.street.trim());
+
+      // Optional fields - only add if they exist
+      if (order.shippingAddress.area && order.shippingAddress.area.trim()) {
+        addressParts.push(order.shippingAddress.area.trim());
+      }
+      if (order.shippingAddress.upazila && order.shippingAddress.upazila.trim()) {
+        addressParts.push(order.shippingAddress.upazila.trim());
+      }
+      if (order.shippingAddress.district && order.shippingAddress.district.trim()) {
+        addressParts.push(order.shippingAddress.district.trim());
+      }
+      if (order.shippingAddress.division && order.shippingAddress.division.trim()) {
+        addressParts.push(order.shippingAddress.division.trim());
+      }
+      if (order.shippingAddress.postalCode && order.shippingAddress.postalCode.trim()) {
+        addressParts.push(order.shippingAddress.postalCode.trim());
+      }
+
+      recipientAddress = addressParts.join(', ');
+    } else if (order.guestInfo?.address) {
+      // For guest orders, use the address string directly (should contain street)
+      if (!order.guestInfo.address || order.guestInfo.address.trim() === '') {
+        return sendResponse({
+          res,
+          statusCode: 400,
+          success: false,
+          message: 'Street address is required',
+        });
+      }
+      recipientAddress = order.guestInfo.address.trim();
+    } else if (order.manualOrderInfo?.address) {
+      // For manual orders, use the address string directly (should contain street)
+      if (!order.manualOrderInfo.address || order.manualOrderInfo.address.trim() === '') {
+        return sendResponse({
+          res,
+          statusCode: 400,
+          success: false,
+          message: 'Street address is required',
+        });
+      }
+      recipientAddress = order.manualOrderInfo.address.trim();
+    } else {
+      return sendResponse({
+        res,
+        statusCode: 400,
+        success: false,
+        message: 'Street address is required',
+      });
+    }
+
+    // Validate required fields
+    if (!recipientName) {
+      return sendResponse({
+        res,
+        statusCode: 400,
+        success: false,
+        message: 'Recipient name is required',
+      });
+    }
+
+    if (!recipientPhone || recipientPhone.length !== 11) {
+      return sendResponse({
+        res,
+        statusCode: 400,
+        success: false,
+        message: 'Valid 11-digit phone number is required',
+      });
+    }
+
+    // Validate address length (max 250 chars for Steadfast)
+    if (recipientAddress.length > 250) {
+      return sendResponse({
+        res,
+        statusCode: 400,
+        success: false,
+        message: 'Address must be within 250 characters',
+      });
+    }
+
+    // Build item description
+    const itemDescriptions = order.items.map(item => {
+      return `${item.name || item.product?.title || 'Product'} (Qty: ${item.quantity})`;
+    });
+    const itemDescription = itemDescriptions.join(', ');
+
+    // Prepare order data for Steadfast
+    const steadfastOrderData = {
+      invoice: order.orderId || order._id.toString(),
+      recipient_name: recipientName,
+      recipient_phone: recipientPhone,
+      recipient_email: recipientEmail || undefined,
+      recipient_address: recipientAddress.substring(0, 250), // Ensure max 250 chars
+      cod_amount: order.total || 0,
+      note: order.orderNotes || undefined,
+      item_description: itemDescription || undefined,
+      delivery_type: 0 // 0 = home delivery
+    };
+
+    // Send order to Steadfast
+    const steadfastResponse = await steadfastService.createOrder(steadfastOrderData);
+
+    if (!steadfastResponse.success) {
+      // Check if it's a credentials error and provide user-friendly message
+      let errorMessage = steadfastResponse.error?.message || 'Failed to add order to Steadfast Courier';
+
+      // If it's a credentials error, provide more helpful message
+      if (errorMessage.includes('credentials') || errorMessage.includes('configured')) {
+        errorMessage = 'Steadfast Courier API credentials are not configured. Please go to Settings > Steadfast Configuration and add your API Key and Secret Key to enable order delivery integration.';
+      }
+
+      return sendResponse({
+        res,
+        statusCode: steadfastResponse.statusCode || 500,
+        success: false,
+        message: errorMessage,
+        error: steadfastResponse.error
+      });
+    }
+
+    // Update order with Steadfast information and change status to shipped
+    order.isAddedIntoSteadfast = true;
+    order.status = 'shipped';
+    if (steadfastResponse.data?.consignment?.consignment_id) {
+      order.steadfastConsignmentId = steadfastResponse.data.consignment.consignment_id.toString();
+    }
+    if (steadfastResponse.data?.consignment?.tracking_code) {
+      order.steadfastTrackingCode = steadfastResponse.data.consignment.tracking_code;
+    }
+
+    // Update status timestamps
+    if (!order.statusTimestamps) {
+      order.statusTimestamps = {};
+    }
+    order.statusTimestamps.shipped = new Date();
+
+    await order.save();
+
+    return sendResponse({
+      res,
+      statusCode: 200,
+      success: true,
+      message: 'Order successfully added to Steadfast',
+      data: {
+        order: order,
+        steadfastResponse: steadfastResponse.data
+      }
+    });
+  } catch (error) {
+    console.error('Error adding order to Steadfast:', error);
+    return sendResponse({
+      res,
+      statusCode: 500,
+      success: false,
+      message: error.message || 'Server error',
     });
   }
 };

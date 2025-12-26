@@ -3,7 +3,6 @@ const cors = require('cors');
 const morgan = require('morgan');
 const path = require('path');
 const connectDB = require('./config/db');
-const expressSyncHelper = require('express-sync-helper');
 const { globalErrorHandler, notFound } = require('./utils/errorHandler');
 const dotenv = require('dotenv');
 const routes = require('./routes/index');
@@ -62,8 +61,6 @@ app.use(cors({
         if (allowedOrigins.includes(origin)) {
             callback(null, true);
         } else {
-            // Log for debugging
-            console.log('CORS blocked origin:', origin);
             callback(null, false);
         }
     },
@@ -77,7 +74,6 @@ app.use(express.json({ limit: '50mb' }));
 app.use(morgan('dev'));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
-app.use(expressSyncHelper());
 
 
 // Serve static files from uploads directory

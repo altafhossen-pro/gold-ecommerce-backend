@@ -29,4 +29,8 @@ router.put('/email-sms', verifyToken, verifyTokenAdmin, settingsController.updat
 router.get('/affiliate', settingsController.getAffiliateSettings);
 router.put('/affiliate', verifyToken, verifyTokenAdmin, settingsController.updateAffiliateSettings);
 
+// Steadfast settings endpoints
+router.get('/steadfast', settingsController.getSteadfastSettings);
+router.put('/steadfast', verifyToken, verifyTokenAdmin, settingsController.updateSteadfastSettings);
+
 module.exports = router;

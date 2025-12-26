@@ -30,7 +30,6 @@ class OTPService {
       const result = await sendOTPSMS(phone, otp, brandName);
 
       if (result.success) {
-        console.log(`OTP sent successfully to ${phone}`);
         return true;
       } else {
         console.error(`Failed to send OTP to ${phone}:`, result.error);

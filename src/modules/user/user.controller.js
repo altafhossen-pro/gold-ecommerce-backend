@@ -448,11 +448,6 @@ exports.getUsers = async (req, res) => {
     // Calculate skip value
     const skip = (page - 1) * limit;
     
-    // Debug: Log the filter being used
-    if (staffOnly || customersOnly) {
-      console.log('Filter for', staffOnly ? 'staff' : 'customers', ':', JSON.stringify(filter, null, 2));
-    }
-    
     // Get users with pagination
     const users = await User.find(filter)
       .select('-password') // Exclude password

@@ -91,7 +91,7 @@ const shippingInfoSchema = new mongoose.Schema({
 const productSchema = new mongoose.Schema({
   title: { type: String, required: true },
   shortDescription: { type: String, maxlength: 500 },
-  description: { type: String, required: true },
+  description: { type: String },
   category: { type: mongoose.Schema.Types.ObjectId, ref: 'Category', required: true },
   subCategories: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Category' }],
   brand: { type: String },

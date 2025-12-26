@@ -601,3 +601,77 @@ exports.deleteCategory = async (req, res) => {
   }
 };
 
+// Get categories with children for megamenu
+exports.getCategoriesForMegamenu = async (req, res) => {
+  try {
+    const categories = await Category.aggregate([
+      {
+        $match: { 
+          parent: null, // Only parent categories
+          isActive: true // Only active categories
+        }
+      },
+      {
+        $lookup: {
+          from: 'categories',
+          let: { parentId: '$_id' },
+          pipeline: [
+            {
+              $match: {
+                $expr: { $eq: ['$parent', '$$parentId'] },
+                isActive: true
+              }
+            },
+            {
+              $project: {
+                _id: 1,
+                name: 1,
+                slug: 1,
+                image: 1,
+                parent: 1,
+                isActive: 1,
+                sortOrder: 1
+              }
+            },
+            {
+              $sort: { sortOrder: 1, name: 1 }
+            }
+          ],
+          as: 'childCategories'
+        }
+      },
+      {
+        $project: {
+          _id: 1,
+          name: 1,
+          slug: 1,
+          image: 1,
+          parent: 1,
+          isActive: 1,
+          isFeatured: 1,
+          sortOrder: 1,
+          childCategories: 1
+        }
+      },
+      {
+        $sort: { sortOrder: 1, name: 1 }
+      }
+    ]);
+
+    return sendResponse({
+      res,
+      statusCode: 200,
+      success: true,
+      message: 'Categories for megamenu fetched successfully',
+      data: categories,
+    });
+  } catch (error) {
+    return sendResponse({
+      res,
+      statusCode: 500,
+      success: false,
+      message: error.message || 'Server error',
+    });
+  }
+};
+
