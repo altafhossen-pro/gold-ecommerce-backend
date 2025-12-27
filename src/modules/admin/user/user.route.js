@@ -15,7 +15,7 @@ router.get('/:id', checkPermission('user', 'read'), userController.getUserById);
 router.put('/:id', checkPermission('user', 'update'), userController.updateUser);
 router.patch('/:id', checkPermission('user', 'update'), userController.updateUser);
 router.delete('/:id', checkPermission('user', 'delete'), userController.deleteUser);
-// Admins should not create users via admin API; disable the route below
-// router.post('/', userController.createUser);
+// Create staff (Super Admin only - permission check done in controller)
+router.post('/staff', verifyTokenAdmin, userController.createStaff);
 
 module.exports = router;

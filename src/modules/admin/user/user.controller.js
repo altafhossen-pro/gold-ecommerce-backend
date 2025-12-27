@@ -408,3 +408,120 @@ exports.adminLogin = async (req, res) => {
     });
   }
 };
+
+// Create staff member (Super Admin only)
+exports.createStaff = async (req, res) => {
+  try {
+    // Only Super Admin can create staff
+    let requesterIsSuperAdmin = false;
+    if (req.user?.roleId) {
+      const requesterRole = await Role.findById(req.user.roleId);
+      requesterIsSuperAdmin = !!requesterRole?.isSuperAdmin;
+    }
+    
+    if (!requesterIsSuperAdmin) {
+      return sendResponse({ 
+        res, 
+        statusCode: 403, 
+        success: false, 
+        message: "Only Super Admin can create staff members" 
+      });
+    }
+
+    const { name, email, phone, password, roleId, status } = req.body;
+
+    // Validate required fields
+    if (!name || !email || !password) {
+      return sendResponse({
+        res,
+        statusCode: 400,
+        success: false,
+        message: 'Name, email, and password are required',
+      });
+    }
+
+    // Check if user already exists
+    const existingUser = await User.findOne({
+      $or: [
+        { email: email.toLowerCase() },
+        ...(phone ? [{ phone }] : [])
+      ]
+    });
+
+    if (existingUser) {
+      return sendResponse({
+        res,
+        statusCode: 409,
+        success: false,
+        message: 'User with this email or phone already exists',
+      });
+    }
+
+    // Hash password
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    // Build user data
+    const userData = {
+      name,
+      email: email.toLowerCase(),
+      password: hashedPassword,
+      role: 'admin', // Staff members have admin role
+      status: status || 'active',
+    };
+
+    // Add phone if provided
+    if (phone && phone.trim()) {
+      userData.phone = phone.trim();
+    }
+
+    // Add roleId if provided (for staff with custom roles)
+    if (roleId && roleId.trim()) {
+      // Check if the role exists
+      const assignedRole = await Role.findById(roleId);
+      if (!assignedRole) {
+        return sendResponse({
+          res,
+          statusCode: 400,
+          success: false,
+          message: 'Invalid role ID',
+        });
+      }
+      
+      // Only Super Admin can assign Super Admin role (already checked above)
+      if (assignedRole.isSuperAdmin && !requesterIsSuperAdmin) {
+        return sendResponse({
+          res,
+          statusCode: 403,
+          success: false,
+          message: 'Only Super Admin can assign Super Admin role',
+        });
+      }
+      
+      userData.roleId = roleId;
+    }
+
+    // Create user
+    const user = new User(userData);
+    await user.save();
+
+    // Remove password from response
+    const userObj = user.toObject();
+    delete userObj.password;
+
+    return sendResponse({ 
+      res, 
+      statusCode: 201, 
+      success: true, 
+      message: 'Staff member created successfully', 
+      data: userObj 
+    });
+  } catch (error) {
+    console.error('Error creating staff:', error);
+    return sendResponse({ 
+      res, 
+      statusCode: 500, 
+      success: false, 
+      message: error.message || 'Error creating staff member' 
+    });
+  }
+};
