@@ -1,44 +1,14 @@
 const mongoose = require('mongoose');
 
 const heroBannerSchema = new mongoose.Schema({
-  title: {
+  image: {
     type: String,
     required: true,
     trim: true
   },
-  description: {
+  link: {
     type: String,
-    required: true,
-    trim: true
-  },
-  modelImage: {
-    type: String,
-    required: true,
-    trim: true
-  },
-  backgroundGradient: {
-    type: String,
-    required: true,
-    trim: true
-  },
-  button1Text: {
-    type: String,
-    required: true,
-    trim: true
-  },
-  button1Link: {
-    type: String,
-    required: true,
-    trim: true
-  },
-  button2Text: {
-    type: String,
-    required: true,
-    trim: true
-  },
-  button2Link: {
-    type: String,
-    required: true,
+    required: false,
     trim: true
   },
   isActive: {

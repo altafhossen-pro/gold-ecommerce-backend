@@ -54,19 +54,23 @@ exports.getAllHeroBanners = async (req, res) => {
 // Admin: Create hero banner
 exports.createHeroBanner = async (req, res) => {
   try {
-    const { title, description, modelImage, backgroundGradient, button1Text, button1Link, button2Text, button2Link, isActive, order } = req.body;
+    const { image, link, isActive, order } = req.body;
+
+    if (!image) {
+      return sendResponse({
+        res,
+        statusCode: 400,
+        success: false,
+        message: 'Image is required',
+      });
+    }
 
     const bannerData = {
-      title,
-      description,
-      modelImage,
-      backgroundGradient,
-      button1Text,
-      button1Link,
-      button2Text,
-      button2Link,
+      image,
+      link: link || '',
       isActive: isActive !== false,
-      order: order || 0
+      order: order || 0,
+      createdBy: req.user?._id
     };
 
     const banner = new HeroBanner(bannerData);
@@ -94,19 +98,23 @@ exports.createHeroBanner = async (req, res) => {
 exports.updateHeroBanner = async (req, res) => {
   try {
     const { id } = req.params;
-    const { title, description, modelImage, backgroundGradient, button1Text, button1Link, button2Text, button2Link, isActive, order } = req.body;
+    const { image, link, isActive, order } = req.body;
+
+    if (!image) {
+      return sendResponse({
+        res,
+        statusCode: 400,
+        success: false,
+        message: 'Image is required',
+      });
+    }
 
     const updateData = {
-      title,
-      description,
-      modelImage,
-      backgroundGradient,
-      button1Text,
-      button1Link,
-      button2Text,
-      button2Link,
+      image,
+      link: link || '',
       isActive: isActive !== false,
-      order: order || 0
+      order: order || 0,
+      updatedBy: req.user?._id
     };
 
     const banner = await HeroBanner.findByIdAndUpdate(
