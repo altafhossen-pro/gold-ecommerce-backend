@@ -896,6 +896,13 @@ exports.updateOrder = async (req, res) => {
       }));
     }
 
+    // Automatically update payment status to 'paid' for COD orders when status changes to 'delivered'
+    if (updates.status === 'delivered' && oldOrder.status !== 'delivered') {
+      if (oldOrder.paymentMethod === 'cod' && oldOrder.paymentStatus !== 'paid') {
+        updates.paymentStatus = 'paid';
+      }
+    }
+
     const order = await Order.findByIdAndUpdate(id, updates, { new: true });
 
     // If status changed to 'confirmed', reduce variant stock
@@ -1501,6 +1508,12 @@ exports.updateOrderComprehensive = async (req, res) => {
         ...oldOrder.statusTimestamps,
         [updateData.status]: new Date()
       };
+
+      // Automatically update payment status to 'paid' for COD orders when status changes to 'delivered'
+      if (updateData.status === 'delivered' && oldOrder.paymentMethod === 'cod' && oldOrder.paymentStatus !== 'paid') {
+        updateData.paymentStatus = 'paid';
+        updates.paymentStatus = 'paid';
+      }
     }
 
     // Update payment status if provided
