@@ -26,6 +26,7 @@ const addressRoutes = require('../modules/address/address.route');
 const adsRoutes = require('../modules/ads/ads.route');
 const roleRoutes = require('../modules/role/role.route');
 const affiliateRoutes = require('../modules/affiliate/affiliate.route');
+const contactRoutes = require('../modules/contact/contact.route');
 
 router.use('/user', userRoutes);
 router.use('/otp', otpRoutes);
@@ -52,6 +53,7 @@ router.use('/address', addressRoutes);
 router.use('/ads', adsRoutes);
 router.use('/admin/role', roleRoutes);
 router.use('/affiliate', affiliateRoutes);
+router.use('/contact', contactRoutes);
 
 // Health check route
 router.get('/health', (req, res) => {
