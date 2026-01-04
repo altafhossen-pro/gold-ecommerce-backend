@@ -425,8 +425,105 @@ const sendOrderConfirmationEmail = async (order, user) => {
   }
 };
 
+// Send welcome email to new users
+const sendWelcomeEmail = async (user, signupBonusCoins = 0) => {
+  try {
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+    const subject = 'Welcome to Forpink! 🎉';
+    const text = `Welcome to Forpink, ${user.name}! Thank you for joining us. We're excited to have you as part of our community.${signupBonusCoins > 0 ? ` As a welcome gift, you've received ${signupBonusCoins} coins!` : ''} Start shopping now: ${frontendUrl}`;
+    
+    const html = `
+      <!DOCTYPE html>
+      <html lang="en">
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+        <meta name="format-detection" content="telephone=no">
+      </head>
+      <body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f8f9fa;">
+        <table role="presentation" style="width: 100%; border-collapse: collapse; background-color: #f8f9fa; padding: 20px 0;">
+          <tr>
+            <td align="center">
+              <table role="presentation" style="width: 600px; border-collapse: collapse; background-color: #ffffff; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); overflow: hidden;">
+                <!-- Header -->
+                <tr>
+                  <td style="background: linear-gradient(135deg, #ec4899 0%, #be185d 100%); padding: 40px 40px 30px; text-align: center;">
+                    <h1 style="margin: 0; color: #ffffff; font-size: 28px; font-weight: 600; letter-spacing: -0.5px;">Welcome to Forpink! 🎉</h1>
+                    <p style="margin: 8px 0 0; color: #fce7f3; font-size: 14px; font-weight: 400;">Your trusted shopping partner</p>
+                  </td>
+                </tr>
+                
+                <!-- Content -->
+                <tr>
+                  <td style="padding: 40px;">
+                    <h2 style="margin: 0 0 20px; color: #1f2937; font-size: 22px; font-weight: 600;">Hello, ${user.name || 'Valued Customer'}!</h2>
+                    <p style="margin: 0 0 24px; color: #4b5563; font-size: 15px; line-height: 1.6;">
+                      Thank you for joining Forpink! We're thrilled to have you as part of our community. Your account has been successfully created and you're all set to start shopping.
+                    </p>
+                    
+                    ${signupBonusCoins > 0 ? `
+                    <!-- Welcome Bonus Box -->
+                    <div style="background: linear-gradient(135deg, #fdf2f8 0%, #fce7f3 100%); border: 2px solid #fbcfe8; border-radius: 12px; padding: 24px; margin: 24px 0; text-align: center;">
+                      <p style="margin: 0 0 12px; color: #9f1239; font-size: 13px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px;">🎁 Welcome Bonus</p>
+                      <p style="margin: 0; color: #be185d; font-size: 18px; font-weight: 700;">
+                        You've received ${signupBonusCoins} coins as a welcome gift!
+                      </p>
+                      <p style="margin: 12px 0 0; color: #6b7280; font-size: 14px; line-height: 1.6;">
+                        Use these coins to get discounts on your purchases. Start shopping now!
+                      </p>
+                    </div>
+                    ` : ''}
+                    
+                    <!-- Features -->
+                    <div style="margin: 32px 0;">
+                      <h3 style="margin: 0 0 16px; color: #1f2937; font-size: 18px; font-weight: 600;">What's Next?</h3>
+                      <div style="background-color: #f9fafb; border-radius: 8px; padding: 20px;">
+                        <ul style="margin: 0; padding-left: 20px; color: #4b5563; font-size: 14px; line-height: 1.8;">
+                          <li style="margin-bottom: 8px;">Browse our wide selection of products</li>
+                          <li style="margin-bottom: 8px;">Enjoy fast and secure checkout</li>
+                          <li style="margin-bottom: 8px;">Earn loyalty coins with every purchase</li>
+                          <li style="margin-bottom: 0;">Get exclusive deals and offers</li>
+                        </ul>
+                      </div>
+                    </div>
+
+                    <!-- CTA Button -->
+                    <div style="text-align: center; margin: 32px 0 0;">
+                      <a href="${frontendUrl}" style="display: inline-block; background: linear-gradient(135deg, #ec4899 0%, #be185d 100%); color: #ffffff; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-weight: 600; font-size: 15px;">Start Shopping Now</a>
+                    </div>
+                  </td>
+                </tr>
+                
+                <!-- Footer -->
+                <tr>
+                  <td style="background-color: #f9fafb; padding: 30px 40px; text-align: center; border-top: 1px solid #e5e7eb;">
+                    <p style="margin: 0 0 8px; color: #6b7280; font-size: 13px;">
+                      If you have any questions, feel free to contact our support team.
+                    </p>
+                    <p style="margin: 0; color: #9ca3af; font-size: 12px;">
+                      © ${new Date().getFullYear()} Forpink. All rights reserved.
+                    </p>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+        </table>
+      </body>
+      </html>
+    `;
+
+    return await sendEmail(user.email, subject, text, html);
+  } catch (error) {
+    console.error('Error sending welcome email:', error);
+    throw error;
+  }
+};
+
 module.exports = {
   sendEmail,
   sendOTPEmail,
-  sendOrderConfirmationEmail
+  sendOrderConfirmationEmail,
+  sendWelcomeEmail
 };

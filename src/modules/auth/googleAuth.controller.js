@@ -4,6 +4,9 @@ const jwtService = require('../../services/jwtService');
 const axios = require('axios');
 const bcrypt = require('bcryptjs');
 const querystring = require('querystring');
+const { Loyalty } = require('../loyalty/loyalty.model');
+const Settings = require('../settings/settings.model');
+const { sendWelcomeEmail } = require('../../utils/email');
 require('dotenv').config(); // Ensure dotenv is loaded
 
 // Google OAuth credentials - Must be set in environment variables
@@ -123,6 +126,7 @@ exports.googleCallback = async (req, res) => {
 
     // Check if user exists by email
     let user = await User.findOne({ email: email.toLowerCase() });
+    let isNewUser = false;
 
     if (!user) {
       // Create new user
@@ -143,6 +147,7 @@ exports.googleCallback = async (req, res) => {
       });
 
       await user.save();
+      isNewUser = true;
     } else {
       // Update existing user with Google info if needed
       if (!user.googleId) {
@@ -154,6 +159,39 @@ exports.googleCallback = async (req, res) => {
       user.emailVerified = true;
       user.lastLogin = new Date();
       await user.save();
+    }
+
+    // Get signup bonus coins amount for welcome email
+    let signupBonusCoins = 0;
+    
+    // Give signup bonus coins to new users only
+    if (isNewUser) {
+      try {
+        const settings = await Settings.findOne();
+        if (settings && settings.loyaltySettings?.isLoyaltyEnabled && settings.loyaltySettings?.signupBonusCoins > 0) {
+          signupBonusCoins = settings.loyaltySettings.signupBonusCoins;
+          
+          // Get or create loyalty record
+          let loyalty = await Loyalty.findOne({ user: user._id });
+          if (!loyalty) {
+            loyalty = new Loyalty({ user: user._id, points: 0, coins: 0, history: [] });
+          }
+          
+          // Add signup bonus coins
+          loyalty.coins += signupBonusCoins;
+          loyalty.history.unshift({
+            type: 'earn',
+            points: 0,
+            coins: signupBonusCoins,
+            description: `Welcome bonus: ${signupBonusCoins} coins for signing up`
+          });
+          
+          await loyalty.save();
+        }
+      } catch (error) {
+        // Don't fail Google auth if loyalty bonus fails
+        console.error('Error giving signup bonus:', error);
+      }
     }
 
     // Generate JWT token
@@ -174,6 +212,14 @@ exports.googleCallback = async (req, res) => {
     });
 
     const redirectUrl = `${FRONTEND_URL}/auth/google/success?${redirectParams}`;
+
+    // Send welcome email asynchronously to new users (don't wait for it)
+    if (isNewUser && user.email) {
+      sendWelcomeEmail(user, signupBonusCoins).catch(emailError => {
+        console.error('Failed to send welcome email:', emailError);
+        // Don't fail Google auth if email fails
+      });
+    }
 
     return res.redirect(redirectUrl);
 

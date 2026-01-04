@@ -34,6 +34,13 @@ const settingsSchema = new mongoose.Schema({
     minRedeemAmount: { 
       type: Number, 
       default: 1 // Minimum ৳1 to redeem
+    },
+    
+    // Signup bonus coins
+    signupBonusCoins: {
+      type: Number,
+      default: 0, // Coins given to new users on signup
+      min: 0
     }
   },
 

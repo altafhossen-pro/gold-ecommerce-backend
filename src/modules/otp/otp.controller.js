@@ -3,7 +3,9 @@ const { User } = require('../user/user.model');
 const otpService = require('../../services/otpService');
 const sendResponse = require('../../utils/sendResponse');
 const jwtService = require('../../services/jwtService');
-const { sendOTPEmail } = require('../../utils/email');
+const { sendOTPEmail, sendWelcomeEmail } = require('../../utils/email');
+const { Loyalty } = require('../loyalty/loyalty.model');
+const Settings = require('../settings/settings.model');
 
 /**
  * Send OTP to phone number
@@ -196,6 +198,7 @@ exports.verifyOTP = async (req, res) => {
 
     // Find user by phone, or create new user if doesn't exist (auto-register)
     let user = await User.findOne({ phone });
+    let isNewUser = false;
 
     if (!user) {
       // Create new user account automatically (email is optional in model)
@@ -215,11 +218,45 @@ exports.verifyOTP = async (req, res) => {
         status: 'active', // Default status
       });
       await user.save();
+      isNewUser = true;
     } else {
       // Update existing user's phone verification status and last login
       user.phoneVerified = true;
       user.lastLogin = new Date();
       await user.save();
+    }
+
+    // Get signup bonus coins amount for welcome email
+    let signupBonusCoins = 0;
+    
+    // Give signup bonus coins to new users only
+    if (isNewUser) {
+      try {
+        const settings = await Settings.findOne();
+        if (settings && settings.loyaltySettings?.isLoyaltyEnabled && settings.loyaltySettings?.signupBonusCoins > 0) {
+          signupBonusCoins = settings.loyaltySettings.signupBonusCoins;
+          
+          // Get or create loyalty record
+          let loyalty = await Loyalty.findOne({ user: user._id });
+          if (!loyalty) {
+            loyalty = new Loyalty({ user: user._id, points: 0, coins: 0, history: [] });
+          }
+          
+          // Add signup bonus coins
+          loyalty.coins += signupBonusCoins;
+          loyalty.history.unshift({
+            type: 'earn',
+            points: 0,
+            coins: signupBonusCoins,
+            description: `Welcome bonus: ${signupBonusCoins} coins for signing up`
+          });
+          
+          await loyalty.save();
+        }
+      } catch (error) {
+        // Don't fail OTP verification if loyalty bonus fails
+        console.error('Error giving signup bonus:', error);
+      }
     }
 
     // Generate JWT token using service
@@ -229,7 +266,8 @@ exports.verifyOTP = async (req, res) => {
     const userObj = user.toObject();
     delete userObj.password;
 
-    return sendResponse({
+    // Send response first (don't wait for email)
+    sendResponse({
       res,
       statusCode: 200,
       success: true,
@@ -239,6 +277,14 @@ exports.verifyOTP = async (req, res) => {
         token 
       },
     });
+
+    // Send welcome email asynchronously to new users (if email exists)
+    if (isNewUser && user.email) {
+      sendWelcomeEmail(user, signupBonusCoins).catch(emailError => {
+        console.error('Failed to send welcome email:', emailError);
+        // Don't fail signup if email fails
+      });
+    }
 
   } catch (error) {
     console.error('Verify OTP error:', error);
@@ -758,6 +804,37 @@ exports.verifyRegisterOTP = async (req, res) => {
 
     await user.save();
 
+    // Get signup bonus coins amount for welcome email
+    let signupBonusCoins = 0;
+    
+    // Give signup bonus coins if enabled
+    try {
+      const settings = await Settings.findOne();
+      if (settings && settings.loyaltySettings?.isLoyaltyEnabled && settings.loyaltySettings?.signupBonusCoins > 0) {
+        signupBonusCoins = settings.loyaltySettings.signupBonusCoins;
+        
+        // Get or create loyalty record
+        let loyalty = await Loyalty.findOne({ user: user._id });
+        if (!loyalty) {
+          loyalty = new Loyalty({ user: user._id, points: 0, coins: 0, history: [] });
+        }
+        
+        // Add signup bonus coins
+        loyalty.coins += signupBonusCoins;
+        loyalty.history.unshift({
+          type: 'earn',
+          points: 0,
+          coins: signupBonusCoins,
+          description: `Welcome bonus: ${signupBonusCoins} coins for signing up`
+        });
+        
+        await loyalty.save();
+      }
+    } catch (error) {
+      // Don't fail signup if loyalty bonus fails
+      console.error('Error giving signup bonus:', error);
+    }
+
     // Generate JWT token
     const token = jwtService.generateAccessToken(user._id);
 
@@ -765,7 +842,8 @@ exports.verifyRegisterOTP = async (req, res) => {
     const userObj = user.toObject();
     delete userObj.password;
 
-    return sendResponse({
+    // Send response first (don't wait for email)
+    sendResponse({
       res,
       statusCode: 201,
       success: true,
@@ -775,6 +853,14 @@ exports.verifyRegisterOTP = async (req, res) => {
         token 
       },
     });
+
+    // Send welcome email asynchronously (don't wait for it)
+    if (user.email) {
+      sendWelcomeEmail(user, signupBonusCoins).catch(emailError => {
+        console.error('Failed to send welcome email:', emailError);
+        // Don't fail signup if email fails
+      });
+    }
 
   } catch (error) {
     console.error('Verify Register OTP error:', error);

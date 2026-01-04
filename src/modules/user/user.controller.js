@@ -3,6 +3,9 @@ const bcrypt = require('bcryptjs');
 const sendResponse = require('../../utils/sendResponse');
 const jwtService = require('../../services/jwtService');
 const { uploadSingle, handleUploadError, generateFileUrl, deleteFile } = require('../../utils/fileUpload');
+const { Loyalty } = require('../loyalty/loyalty.model');
+const Settings = require('../settings/settings.model');
+const { sendWelcomeEmail } = require('../../utils/email');
 
 exports.signup = async (req, res) => {
   try {
@@ -39,17 +42,57 @@ exports.signup = async (req, res) => {
     });
     await user.save();
 
+    // Get signup bonus coins amount for welcome email
+    let signupBonusCoins = 0;
+    
+    // Give signup bonus coins if enabled
+    try {
+      const settings = await Settings.findOne();
+      if (settings && settings.loyaltySettings?.isLoyaltyEnabled && settings.loyaltySettings?.signupBonusCoins > 0) {
+        signupBonusCoins = settings.loyaltySettings.signupBonusCoins;
+        
+        // Get or create loyalty record
+        let loyalty = await Loyalty.findOne({ user: user._id });
+        if (!loyalty) {
+          loyalty = new Loyalty({ user: user._id, points: 0, coins: 0, history: [] });
+        }
+        
+        // Add signup bonus coins
+        loyalty.coins += signupBonusCoins;
+        loyalty.history.unshift({
+          type: 'earn',
+          points: 0,
+          coins: signupBonusCoins,
+          description: `Welcome bonus: ${signupBonusCoins} coins for signing up`
+        });
+        
+        await loyalty.save();
+      }
+    } catch (error) {
+      // Don't fail signup if loyalty bonus fails
+      console.error('Error giving signup bonus:', error);
+    }
+
     // Remove password from response
     const userObj = user.toObject();
     delete userObj.password;
 
-    return sendResponse({
+    // Send response first (don't wait for email)
+    sendResponse({
       res,
       statusCode: 201,
       success: true,
       message: 'User registered successfully',
       data: userObj,
     });
+
+    // Send welcome email asynchronously (don't wait for it)
+    if (user.email) {
+      sendWelcomeEmail(user, signupBonusCoins).catch(emailError => {
+        console.error('Failed to send welcome email:', emailError);
+        // Don't fail signup if email fails
+      });
+    }
   } catch (error) {
     return sendResponse({
       res,
