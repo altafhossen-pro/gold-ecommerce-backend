@@ -74,12 +74,18 @@ const permissions = [
 
   // system admin delete user permissions
   { module: 'admin', action: 'delete', description: 'Delete Admin', category: 'admin' },
+
+  // Notification Permissions
+  { module: 'notification', action: 'create', description: 'Create notifications', category: 'system' },
+  { module: 'notification', action: 'read', description: 'View notifications', category: 'system' },
+  { module: 'notification', action: 'update', description: 'Update notifications', category: 'system' },
+  { module: 'notification', action: 'delete', description: 'Delete notifications', category: 'system' },
 ];
 
 const seedPermissions = async () => {
   try {
     console.log('Seeding permissions...');
-    
+
     for (const perm of permissions) {
       await Permission.findOneAndUpdate(
         { module: perm.module, action: perm.action },
@@ -87,7 +93,7 @@ const seedPermissions = async () => {
         { upsert: true, new: true }
       );
     }
-    
+
     console.log(`✅ Successfully seeded ${permissions.length} permissions`);
     return permissions;
   } catch (error) {
