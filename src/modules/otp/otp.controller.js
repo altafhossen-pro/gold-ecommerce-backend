@@ -57,10 +57,10 @@ exports.sendOTP = async (req, res) => {
     }
 
     // Check if there's an unused OTP for this phone (still valid)
-    const existingOTP = await OTP.findOne({ 
-      phone, 
-      isUsed: false, 
-      expiresAt: { $gt: new Date() } 
+    const existingOTP = await OTP.findOne({
+      phone,
+      isUsed: false,
+      expiresAt: { $gt: new Date() }
     });
 
     if (existingOTP) {
@@ -141,8 +141,8 @@ exports.verifyOTP = async (req, res) => {
     }
 
     // Find the OTP record (check both used and expired)
-    const otpRecord = await OTP.findOne({ 
-      phone, 
+    const otpRecord = await OTP.findOne({
+      phone,
       isUsed: false
     });
 
@@ -228,20 +228,20 @@ exports.verifyOTP = async (req, res) => {
 
     // Get signup bonus coins amount for welcome email
     let signupBonusCoins = 0;
-    
+
     // Give signup bonus coins to new users only
     if (isNewUser) {
       try {
         const settings = await Settings.findOne();
         if (settings && settings.loyaltySettings?.isLoyaltyEnabled && settings.loyaltySettings?.signupBonusCoins > 0) {
           signupBonusCoins = settings.loyaltySettings.signupBonusCoins;
-          
+
           // Get or create loyalty record
           let loyalty = await Loyalty.findOne({ user: user._id });
           if (!loyalty) {
             loyalty = new Loyalty({ user: user._id, points: 0, coins: 0, history: [] });
           }
-          
+
           // Add signup bonus coins
           loyalty.coins += signupBonusCoins;
           loyalty.history.unshift({
@@ -250,7 +250,7 @@ exports.verifyOTP = async (req, res) => {
             coins: signupBonusCoins,
             description: `Welcome bonus: ${signupBonusCoins} coins for signing up`
           });
-          
+
           await loyalty.save();
         }
       } catch (error) {
@@ -262,9 +262,46 @@ exports.verifyOTP = async (req, res) => {
     // Generate JWT token using service
     const token = jwtService.generateAccessToken(user._id);
 
-    // Remove password from response
-    const userObj = user.toObject();
-    delete userObj.password;
+    // Fetch full user profile with role and permissions
+    const { Role } = require('../role/role.model');
+    const fullUser = await User.findById(user._id)
+      .populate({
+        path: 'roleId',
+        populate: { path: 'permissions' }
+      })
+      .select('-password');
+
+    let permissions = [];
+    let role = null;
+
+    if (fullUser && fullUser.roleId) {
+      role = fullUser.roleId;
+
+      if (role.permissions && role.permissions.length > 0) {
+        permissions = role.permissions.map(p => ({
+          _id: p._id,
+          module: p.module,
+          action: p.action,
+          description: p.description,
+          category: p.category,
+        }));
+      }
+    }
+
+    const userDataResponse = {
+      ...(fullUser ? fullUser.toObject() : user.toObject()),
+      roleDetails: role ? {
+        _id: role._id,
+        name: role.name,
+        slug: role.slug,
+        description: role.description,
+        isSuperAdmin: role.isSuperAdmin,
+        isDefault: role.isDefault,
+        isActive: role.isActive,
+        permissions: permissions,
+      } : null,
+      permissions: permissions,
+    };
 
     // Send response first (don't wait for email)
     sendResponse({
@@ -272,9 +309,9 @@ exports.verifyOTP = async (req, res) => {
       statusCode: 200,
       success: true,
       message: 'OTP verified successfully',
-      data: { 
-        user: userObj, 
-        token 
+      data: {
+        user: userDataResponse,
+        token
       },
     });
 
@@ -333,9 +370,9 @@ exports.resendOTP = async (req, res) => {
     }
 
     // Delete any existing unused OTPs for this phone
-    await OTP.deleteMany({ 
-      phone, 
-      isUsed: false 
+    await OTP.deleteMany({
+      phone,
+      isUsed: false
     });
 
     // Generate new OTP
@@ -403,8 +440,8 @@ exports.getOTPStatus = async (req, res) => {
       });
     }
 
-    const otpRecord = await OTP.findOne({ 
-      phone, 
+    const otpRecord = await OTP.findOne({
+      phone,
       isUsed: false,
       expiresAt: { $gt: new Date() }
     }).sort({ createdAt: -1 });
@@ -500,13 +537,13 @@ exports.sendRegisterOTP = async (req, res) => {
     if (recentOTPRequests.length >= rateLimitCount) {
       const fifthRequestTime = recentOTPRequests[rateLimitCount - 1].createdAt;
       const timeSinceFifthRequest = Date.now() - fifthRequestTime.getTime();
-      
+
       // If less than 5 minutes have passed since the 5th request, block user
       if (timeSinceFifthRequest < blockDuration) {
         const remainingBlockTime = blockDuration - timeSinceFifthRequest;
         const remainingMinutes = Math.ceil(remainingBlockTime / (60 * 1000));
         const remainingSeconds = Math.ceil((remainingBlockTime % (60 * 1000)) / 1000);
-        
+
         let timeMessage = '';
         if (remainingMinutes > 0) {
           timeMessage = `${remainingMinutes} minute${remainingMinutes > 1 ? 's' : ''}`;
@@ -516,7 +553,7 @@ exports.sendRegisterOTP = async (req, res) => {
         } else {
           timeMessage = `${remainingSeconds} second${remainingSeconds > 1 ? 's' : ''}`;
         }
-        
+
         return sendResponse({
           res,
           statusCode: 429,
@@ -527,9 +564,9 @@ exports.sendRegisterOTP = async (req, res) => {
     }
 
     // Check if there's an unused OTP for this email (still valid)
-    const existingOTP = await OTP.findOne({ 
-      email: email.toLowerCase(), 
-      isUsed: false, 
+    const existingOTP = await OTP.findOne({
+      email: email.toLowerCase(),
+      isUsed: false,
       expiresAt: { $gt: new Date() },
       type: 'registration'
     });
@@ -607,8 +644,8 @@ exports.verifyRegisterOTPOnly = async (req, res) => {
     }
 
     // Find the OTP record
-    const otpRecord = await OTP.findOne({ 
-      email: email.toLowerCase(), 
+    const otpRecord = await OTP.findOne({
+      email: email.toLowerCase(),
       isUsed: false,
       type: 'registration'
     });
@@ -706,8 +743,8 @@ exports.verifyRegisterOTP = async (req, res) => {
     }
 
     // Find the OTP record
-    const otpRecord = await OTP.findOne({ 
-      email: email.toLowerCase(), 
+    const otpRecord = await OTP.findOne({
+      email: email.toLowerCase(),
       isUsed: false,
       type: 'registration'
     });
@@ -763,7 +800,7 @@ exports.verifyRegisterOTP = async (req, res) => {
     await otpRecord.save();
 
     // Check if user already exists (double check)
-    const existingUser = await User.findOne({ 
+    const existingUser = await User.findOne({
       $or: [
         { email: email.toLowerCase() },
         ...(phone ? [{ phone }] : [])
@@ -806,19 +843,19 @@ exports.verifyRegisterOTP = async (req, res) => {
 
     // Get signup bonus coins amount for welcome email
     let signupBonusCoins = 0;
-    
+
     // Give signup bonus coins if enabled
     try {
       const settings = await Settings.findOne();
       if (settings && settings.loyaltySettings?.isLoyaltyEnabled && settings.loyaltySettings?.signupBonusCoins > 0) {
         signupBonusCoins = settings.loyaltySettings.signupBonusCoins;
-        
+
         // Get or create loyalty record
         let loyalty = await Loyalty.findOne({ user: user._id });
         if (!loyalty) {
           loyalty = new Loyalty({ user: user._id, points: 0, coins: 0, history: [] });
         }
-        
+
         // Add signup bonus coins
         loyalty.coins += signupBonusCoins;
         loyalty.history.unshift({
@@ -827,7 +864,7 @@ exports.verifyRegisterOTP = async (req, res) => {
           coins: signupBonusCoins,
           description: `Welcome bonus: ${signupBonusCoins} coins for signing up`
         });
-        
+
         await loyalty.save();
       }
     } catch (error) {
@@ -838,9 +875,46 @@ exports.verifyRegisterOTP = async (req, res) => {
     // Generate JWT token
     const token = jwtService.generateAccessToken(user._id);
 
-    // Remove password from response
-    const userObj = user.toObject();
-    delete userObj.password;
+    // Fetch full user profile with role and permissions
+    const { Role } = require('../role/role.model');
+    const fullUser = await User.findById(user._id)
+      .populate({
+        path: 'roleId',
+        populate: { path: 'permissions' }
+      })
+      .select('-password');
+
+    let permissions = [];
+    let role = null;
+
+    if (fullUser && fullUser.roleId) {
+      role = fullUser.roleId;
+
+      if (role.permissions && role.permissions.length > 0) {
+        permissions = role.permissions.map(p => ({
+          _id: p._id,
+          module: p.module,
+          action: p.action,
+          description: p.description,
+          category: p.category,
+        }));
+      }
+    }
+
+    const userDataResponse = {
+      ...(fullUser ? fullUser.toObject() : user.toObject()),
+      roleDetails: role ? {
+        _id: role._id,
+        name: role.name,
+        slug: role.slug,
+        description: role.description,
+        isSuperAdmin: role.isSuperAdmin,
+        isDefault: role.isDefault,
+        isActive: role.isActive,
+        permissions: permissions,
+      } : null,
+      permissions: permissions,
+    };
 
     // Send response first (don't wait for email)
     sendResponse({
@@ -848,9 +922,9 @@ exports.verifyRegisterOTP = async (req, res) => {
       statusCode: 201,
       success: true,
       message: 'Account created successfully',
-      data: { 
-        user: userObj, 
-        token 
+      data: {
+        user: userDataResponse,
+        token
       },
     });
 

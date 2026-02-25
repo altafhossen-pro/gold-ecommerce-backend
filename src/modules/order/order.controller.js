@@ -1415,6 +1415,10 @@ exports.updateOrderComprehensive = async (req, res) => {
       }
 
       // Validate all items exist and have sufficient stock
+      // Important: Account for stock already deducted for this order
+      const stockDeductedStatuses = ['confirmed', 'processing', 'shipped', 'delivered'];
+      const isWasDeducted = stockDeductedStatuses.includes(oldOrder.status);
+
       for (const item of updateData.items) {
         const product = await Product.findById(item.product);
         if (!product) {
@@ -1425,6 +1429,14 @@ exports.updateOrderComprehensive = async (req, res) => {
             message: `Product not found: ${item.product}`,
           });
         }
+
+        // Find the matching item in the old order to see what was already "reserved"
+        const matchedOldItem = oldOrder.items.find(oi =>
+          oi.product?._id?.toString() === item.product?.toString() &&
+          ((!oi.variant && !item.variant) || (oi.variant?.sku === item.variant?.sku))
+        );
+
+        const oldQuantity = matchedOldItem ? matchedOldItem.quantity : 0;
 
         // Check stock availability
         if (item.variant && item.variant.sku) {
@@ -1437,7 +1449,11 @@ exports.updateOrderComprehensive = async (req, res) => {
               message: `Variant not found: ${item.variant.sku}`,
             });
           }
-          if (variant.stockQuantity < item.quantity) {
+
+          // Total available = Current stock + (Old quantity if it was already deducted)
+          const availableStock = (variant.stockQuantity || 0) + (isWasDeducted ? oldQuantity : 0);
+
+          if (availableStock < item.quantity) {
             return sendResponse({
               res,
               statusCode: 400,
@@ -1446,7 +1462,10 @@ exports.updateOrderComprehensive = async (req, res) => {
             });
           }
         } else {
-          if (product.totalStock < item.quantity) {
+          // Total available = Current stock + (Old quantity if it was already deducted)
+          const availableStock = (product.totalStock || 0) + (isWasDeducted ? oldQuantity : 0);
+
+          if (availableStock < item.quantity) {
             return sendResponse({
               res,
               statusCode: 400,
@@ -1492,7 +1511,10 @@ exports.updateOrderComprehensive = async (req, res) => {
       const currentStatus = oldOrder.status;
       const newStatus = updateData.status;
 
-      if (!validTransitions[currentStatus] || !validTransitions[currentStatus].includes(newStatus)) {
+      // Allow any status transition if overrideStatus query param or allowAnyStatus body flag is true
+      const isOverride = req.query.overrideStatus === 'true' || updateData.allowAnyStatus === true;
+
+      if (!isOverride && (!validTransitions[currentStatus] || !validTransitions[currentStatus].includes(newStatus))) {
         return sendResponse({
           res,
           statusCode: 400,
@@ -1611,130 +1633,203 @@ exports.updateOrderComprehensive = async (req, res) => {
       .populate('items.product', 'title featuredImage slug')
       .populate('updateHistory.updatedBy', 'name email');
 
-    // Handle stock updates based on status changes
-    if (updateData.status === 'confirmed' && oldOrder.status !== 'confirmed') {
-      // Reduce stock for confirmed orders
-      for (const item of updatedOrder.items) {
+    // Handle stock updates based on status changes and item changes
+    const stockDeductedStatuses = ['confirmed', 'processing', 'shipped', 'delivered'];
+    const isOldDeducted = stockDeductedStatuses.includes(oldOrder.status);
+    const isNewDeducted = stockDeductedStatuses.includes(updatedOrder.status);
+
+    if (isOldDeducted && !isNewDeducted) {
+      // Transition from deducted to non-deducted (pending, cancelled, returned): Add OLD items stock back
+      for (const item of oldOrder.items) {
+        const productId = item.product?._id || item.product;
         if (item.variant && item.variant.sku) {
-          await Product.findOneAndUpdate(
-            { _id: item.product, 'variants.sku': item.variant.sku },
-            { $inc: { 'variants.$.stockQuantity': -item.quantity } }
+          const result = await Product.findOneAndUpdate(
+            { _id: productId, 'variants.sku': item.variant.sku },
+            { $inc: { 'variants.$.stockQuantity': +item.quantity } },
+            { new: true }
           );
-        } else {
-          await Product.findByIdAndUpdate(
-            item.product,
-            { $inc: { totalStock: -item.quantity } }
-          );
-        }
-      }
-
-    }
-
-    if (updateData.status === 'returned' && oldOrder.status !== 'returned') {
-      // Add stock back for returned orders
-      for (const item of updatedOrder.items) {
-        if (item.variant && item.variant.sku) {
-          await Product.findOneAndUpdate(
-            { _id: item.product, 'variants.sku': item.variant.sku },
-            { $inc: { 'variants.$.stockQuantity': +item.quantity } }
-          );
-        } else {
-          await Product.findByIdAndUpdate(
-            item.product,
-            { $inc: { totalStock: +item.quantity } }
-          );
-        }
-      }
-    }
-
-    if (updateData.status === 'delivered' && oldOrder.status !== 'delivered') {
-      // Update totalSold for delivered orders
-      for (const item of updatedOrder.items) {
-        await Product.findByIdAndUpdate(
-          item.product,
-          { $inc: { totalSold: item.quantity } }
-        );
-      }
-
-      // Add affiliate loyalty points to purchaser (if logged in and affiliate code was used)
-      if (updatedOrder.affiliateOrder && updatedOrder.affiliateOrder.affiliateCode && updatedOrder.user) {
-        try {
-          const purchaserPoints = parseInt(updatedOrder.affiliateOrder.purchaserLoyaltyPointsPerPurchase || '0');
-          if (purchaserPoints > 0) {
-            // Find or create loyalty record for purchaser
-            let purchaserLoyalty = await Loyalty.findOne({ user: updatedOrder.user });
-            if (!purchaserLoyalty) {
-              purchaserLoyalty = new Loyalty({ user: updatedOrder.user, points: 0, coins: 0, history: [] });
-            }
-
-            // Check if points already awarded (to avoid duplicate awards)
-            const tracking = await AffiliateTracking.findOne({ order: updatedOrder._id });
-            if (tracking && tracking.purchaserPointsAwarded) {
-
-            } else {
-              // Add points
-              purchaserLoyalty.coins += purchaserPoints;
-              purchaserLoyalty.history.unshift({
-                type: 'earn',
-                points: 0,
-                coins: purchaserPoints,
-                order: updatedOrder._id,
-                description: `Affiliate purchase bonus: ${purchaserPoints} coins (Order #${updatedOrder.orderId})`
-              });
-              await purchaserLoyalty.save();
-
-              // Update affiliate tracking record
-              if (tracking) {
-                tracking.purchaserPointsAwarded = true;
-                tracking.purchaserPointsAwardedAt = new Date();
-                await tracking.save();
-              }
+          if (result) {
+            const updatedTotalStock = result.variants.reduce((total, v) => total + (v.stockQuantity || 0), 0);
+            const prod = await Product.findById(productId);
+            if (prod) {
+              prod.totalStock = updatedTotalStock;
+              await prod.save();
             }
           }
-        } catch (affiliateError) {
-          console.error('Error adding purchaser affiliate loyalty points:', affiliateError);
-          // Don't fail the order update if affiliate points fail
+        } else {
+          await Product.findByIdAndUpdate(productId, { $inc: { totalStock: +item.quantity } });
         }
       }
+    } else if (!isOldDeducted && isNewDeducted) {
+      // Transition from non-deducted to deducted: Deduct NEW items stock
+      for (const item of updatedOrder.items) {
+        const productId = item.product?._id || item.product;
+        if (item.variant && item.variant.sku) {
+          const result = await Product.findOneAndUpdate(
+            { _id: productId, 'variants.sku': item.variant.sku },
+            { $inc: { 'variants.$.stockQuantity': -item.quantity } },
+            { new: true }
+          );
+          if (result) {
+            const updatedTotalStock = result.variants.reduce((total, v) => total + (v.stockQuantity || 0), 0);
+            const prod = await Product.findById(productId);
+            if (prod) {
+              prod.totalStock = updatedTotalStock;
+              await prod.save();
+            }
+          }
+        } else {
+          await Product.findByIdAndUpdate(productId, { $inc: { totalStock: -item.quantity } });
+        }
+      }
+    } else if (isOldDeducted && isNewDeducted && updateData.items) {
+      // Stayed in deducted state, but items changed: Adjust by difference (Revert Old, Apply New)
+      // Revert Old
+      for (const item of oldOrder.items) {
+        const productId = item.product?._id || item.product;
+        if (item.variant && item.variant.sku) {
+          const result = await Product.findOneAndUpdate(
+            { _id: productId, 'variants.sku': item.variant.sku },
+            { $inc: { 'variants.$.stockQuantity': +item.quantity } },
+            { new: true }
+          );
+          if (result) {
+            const updatedTotalStock = result.variants.reduce((total, v) => total + (v.stockQuantity || 0), 0);
+            const prod = await Product.findById(productId);
+            if (prod) {
+              prod.totalStock = updatedTotalStock;
+              await prod.save();
+            }
+          }
+        } else {
+          await Product.findByIdAndUpdate(productId, { $inc: { totalStock: +item.quantity } });
+        }
+      }
+      // Apply New
+      for (const item of updatedOrder.items) {
+        const productId = item.product?._id || item.product;
+        if (item.variant && item.variant.sku) {
+          const result = await Product.findOneAndUpdate(
+            { _id: productId, 'variants.sku': item.variant.sku },
+            { $inc: { 'variants.$.stockQuantity': -item.quantity } },
+            { new: true }
+          );
+          if (result) {
+            const updatedTotalStock = result.variants.reduce((total, v) => total + (v.stockQuantity || 0), 0);
+            const prod = await Product.findById(productId);
+            if (prod) {
+              prod.totalStock = updatedTotalStock;
+              await prod.save();
+            }
+          }
+        } else {
+          await Product.findByIdAndUpdate(productId, { $inc: { totalStock: -item.quantity } });
+        }
+      }
+    }
 
-      // Add affiliate loyalty points to referrer (if affiliate code was used)
-      if (updatedOrder.affiliateOrder && updatedOrder.affiliateOrder.affiliateCode) {
-        try {
-          const referrerPoints = parseInt(updatedOrder.affiliateOrder.referrerLoyaltyPointsPerPurchase || '0');
-          if (referrerPoints > 0) {
-            // Find affiliate tracking record to get referrer
-            const tracking = await AffiliateTracking.findOne({ order: updatedOrder._id }).populate('referrer');
-            if (tracking && tracking.referrer && !tracking.referrerPointsAwarded) {
-              // Find or create loyalty record for referrer
-              let referrerLoyalty = await Loyalty.findOne({ user: tracking.referrer._id });
-              if (!referrerLoyalty) {
-                referrerLoyalty = new Loyalty({ user: tracking.referrer._id, points: 0, coins: 0, history: [] });
-              }
+    // Handle totalSold updates for delivered state
+    if (oldOrder.status === 'delivered' && updatedOrder.status !== 'delivered') {
+      // Moves FROM delivered: subtract from totalSold
+      for (const item of oldOrder.items) {
+        const productId = item.product?._id || item.product;
+        await Product.findByIdAndUpdate(productId, { $inc: { totalSold: -item.quantity } });
+      }
+    } else if (oldOrder.status !== 'delivered' && updatedOrder.status === 'delivered') {
+      // Moves TO delivered: add to totalSold
+      for (const item of updatedOrder.items) {
+        const productId = item.product?._id || item.product;
+        await Product.findByIdAndUpdate(productId, { $inc: { totalSold: item.quantity } });
+      }
+    } else if (oldOrder.status === 'delivered' && updatedOrder.status === 'delivered' && updateData.items) {
+      // Stayed delivered, but items changed: Adjust totalSold
+      for (const item of oldOrder.items) {
+        const productId = item.product?._id || item.product;
+        await Product.findByIdAndUpdate(productId, { $inc: { totalSold: -item.quantity } });
+      }
+      for (const item of updatedOrder.items) {
+        const productId = item.product?._id || item.product;
+        await Product.findByIdAndUpdate(productId, { $inc: { totalSold: item.quantity } });
+      }
+    }
 
-              // Add points
-              referrerLoyalty.coins += referrerPoints;
-              referrerLoyalty.history.unshift({
-                type: 'earn',
-                points: 0,
-                coins: referrerPoints,
-                order: updatedOrder._id,
-                description: `Affiliate referral bonus: ${referrerPoints} coins (Order #${updatedOrder.orderId})`
-              });
-              await referrerLoyalty.save();
+    // Add affiliate loyalty points to purchaser (if logged in and affiliate code was used)
+    if (updatedOrder.affiliateOrder && updatedOrder.affiliateOrder.affiliateCode && updatedOrder.user) {
+      try {
+        const purchaserPoints = parseInt(updatedOrder.affiliateOrder.purchaserLoyaltyPointsPerPurchase || '0');
+        if (purchaserPoints > 0) {
+          // Find or create loyalty record for purchaser
+          let purchaserLoyalty = await Loyalty.findOne({ user: updatedOrder.user });
+          if (!purchaserLoyalty) {
+            purchaserLoyalty = new Loyalty({ user: updatedOrder.user, points: 0, coins: 0, history: [] });
+          }
 
-              // Update tracking record
-              tracking.referrerPointsAwarded = true;
-              tracking.referrerPointsAwardedAt = new Date();
+          // Check if points already awarded (to avoid duplicate awards)
+          const tracking = await AffiliateTracking.findOne({ order: updatedOrder._id });
+          if (tracking && tracking.purchaserPointsAwarded) {
+
+          } else {
+            // Add points
+            purchaserLoyalty.coins += purchaserPoints;
+            purchaserLoyalty.history.unshift({
+              type: 'earn',
+              points: 0,
+              coins: purchaserPoints,
+              order: updatedOrder._id,
+              description: `Affiliate purchase bonus: ${purchaserPoints} coins (Order #${updatedOrder.orderId})`
+            });
+            await purchaserLoyalty.save();
+
+            // Update affiliate tracking record
+            if (tracking) {
+              tracking.purchaserPointsAwarded = true;
+              tracking.purchaserPointsAwardedAt = new Date();
               await tracking.save();
             }
           }
-        } catch (affiliateError) {
-          console.error('Error adding referrer affiliate loyalty points:', affiliateError);
-          // Don't fail the order update if affiliate points fail
         }
+      } catch (affiliateError) {
+        console.error('Error adding purchaser affiliate loyalty points:', affiliateError);
+        // Don't fail the order update if affiliate points fail
       }
     }
 
+    // Add affiliate loyalty points to referrer (if affiliate code was used)
+    if (updatedOrder.affiliateOrder && updatedOrder.affiliateOrder.affiliateCode) {
+      try {
+        const referrerPoints = parseInt(updatedOrder.affiliateOrder.referrerLoyaltyPointsPerPurchase || '0');
+        if (referrerPoints > 0) {
+          // Find affiliate tracking record to get referrer
+          const tracking = await AffiliateTracking.findOne({ order: updatedOrder._id }).populate('referrer');
+          if (tracking && tracking.referrer && !tracking.referrerPointsAwarded) {
+            // Find or create loyalty record for referrer
+            let referrerLoyalty = await Loyalty.findOne({ user: tracking.referrer._id });
+            if (!referrerLoyalty) {
+              referrerLoyalty = new Loyalty({ user: tracking.referrer._id, points: 0, coins: 0, history: [] });
+            }
+
+            // Add points
+            referrerLoyalty.coins += referrerPoints;
+            referrerLoyalty.history.unshift({
+              type: 'earn',
+              points: 0,
+              coins: referrerPoints,
+              order: updatedOrder._id,
+              description: `Affiliate referral bonus: ${referrerPoints} coins (Order #${updatedOrder.orderId})`
+            });
+            await referrerLoyalty.save();
+
+            // Update tracking record
+            tracking.referrerPointsAwarded = true;
+            tracking.referrerPointsAwardedAt = new Date();
+            await tracking.save();
+          }
+        }
+      } catch (affiliateError) {
+        console.error('Error adding referrer affiliate loyalty points:', affiliateError);
+        // Don't fail the order update if affiliate points fail
+      }
+    }
     return sendResponse({
       res,
       statusCode: 200,
@@ -2617,12 +2712,18 @@ exports.getCustomerInfoByPhone = async (req, res) => {
     }
 
     // Always get address from last order's shippingAddress (not from user table)
+    const orderQueryOr = [
+      { 'manualOrderInfo.phone': phoneNumber },
+      { 'guestInfo.phone': phoneNumber }
+    ];
+
+    // Only add user filter if user was found, otherwise it might match null/undefined user fields in guest orders
+    if (user && user._id) {
+      orderQueryOr.push({ user: user._id });
+    }
+
     const latestOrder = await Order.findOne({
-      $or: [
-        { 'manualOrderInfo.phone': phoneNumber },
-        { 'guestInfo.phone': phoneNumber },
-        { user: user?._id } // If user found, also search by user ID
-      ],
+      $or: orderQueryOr,
       isDeleted: false
     })
       .sort({ createdAt: -1 }) // Get the latest order

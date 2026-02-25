@@ -44,19 +44,19 @@ exports.signup = async (req, res) => {
 
     // Get signup bonus coins amount for welcome email
     let signupBonusCoins = 0;
-    
+
     // Give signup bonus coins if enabled
     try {
       const settings = await Settings.findOne();
       if (settings && settings.loyaltySettings?.isLoyaltyEnabled && settings.loyaltySettings?.signupBonusCoins > 0) {
         signupBonusCoins = settings.loyaltySettings.signupBonusCoins;
-        
+
         // Get or create loyalty record
         let loyalty = await Loyalty.findOne({ user: user._id });
         if (!loyalty) {
           loyalty = new Loyalty({ user: user._id, points: 0, coins: 0, history: [] });
         }
-        
+
         // Add signup bonus coins
         loyalty.coins += signupBonusCoins;
         loyalty.history.unshift({
@@ -65,7 +65,7 @@ exports.signup = async (req, res) => {
           coins: signupBonusCoins,
           description: `Welcome bonus: ${signupBonusCoins} coins for signing up`
         });
-        
+
         await loyalty.save();
       }
     } catch (error) {
@@ -141,14 +141,58 @@ exports.login = async (req, res) => {
     }
     // Generate JWT token using service
     const token = jwtService.generateAccessToken(user._id);
-    const userObj = user.toObject();
-    delete userObj.password;
+
+    // Fetch full user with roles and permissions correctly
+    const { Role } = require('../role/role.model');
+    const fullUser = await User.findById(user._id)
+      .populate({
+        path: 'roleId',
+        populate: { path: 'permissions' }
+      })
+      .select('-password');
+
+    let permissions = [];
+    let role = null;
+
+    if (fullUser && fullUser.roleId) {
+      role = fullUser.roleId;
+
+      if (role.permissions && role.permissions.length > 0) {
+        permissions = role.permissions.map(p => ({
+          _id: p._id,
+          module: p.module,
+          action: p.action,
+          description: p.description,
+          category: p.category,
+        }));
+      }
+    }
+
+    // Format user data with role and permissions
+    const userData = {
+      ...(fullUser ? fullUser.toObject() : user.toObject()),
+      roleDetails: role ? {
+        _id: role._id,
+        name: role.name,
+        slug: role.slug,
+        description: role.description,
+        isSuperAdmin: role.isSuperAdmin,
+        isDefault: role.isDefault,
+        isActive: role.isActive,
+        permissions: permissions,
+      } : null,
+      permissions: permissions, // Direct access to permissions array
+    };
+
+    // Remove password from response
+    delete userData.password;
+
     return sendResponse({
       res,
       statusCode: 200,
       success: true,
       message: 'Login successful',
-      data: { user: userObj, token },
+      data: { user: userData, token },
     });
   } catch (error) {
     return sendResponse({
@@ -165,11 +209,14 @@ exports.getProfile = async (req, res) => {
     // Assume req.userId is set by auth middleware
     const { User } = require('./user.model');
     const { Role } = require('../role/role.model');
-    
+
     const user = await User.findById(req.user._id || req.user.id)
-      .populate('roleId')
+      .populate({
+        path: 'roleId',
+        populate: { path: 'permissions' }
+      })
       .select('-password');
-    
+
     if (!user) {
       return sendResponse({
         res,
@@ -182,13 +229,9 @@ exports.getProfile = async (req, res) => {
     // Get permissions if user has a role
     let permissions = [];
     let role = null;
-    
-    if (user.roleId && typeof user.roleId === 'object') {
+
+    if (user.roleId) {
       role = user.roleId;
-      
-      // Populate permissions
-      await role.populate('permissions');
-      
       if (role.permissions && role.permissions.length > 0) {
         permissions = role.permissions.map(p => ({
           _id: p._id,
@@ -237,32 +280,32 @@ exports.updateProfile = async (req, res) => {
   try {
     const userId = req.user._id;
     const { name, phone, address } = req.body;
-    
+
     // Prepare updates object
     const updates = {};
-    
+
     if (name) {
       updates.name = name;
     }
-    
+
     if (phone) {
       updates.phone = phone;
     }
-    
+
     if (address) {
       updates.address = address;
     }
-    
+
     // Check if phone is being updated and if it already exists for another user
     if (phone) {
       const currentUser = await User.findById(userId);
       if (currentUser && currentUser.phone !== phone) {
         // Phone is being changed, check if it exists for another user
-        const existingUser = await User.findOne({ 
-          phone: phone, 
-          _id: { $ne: userId } 
+        const existingUser = await User.findOne({
+          phone: phone,
+          _id: { $ne: userId }
         });
-        
+
         if (existingUser) {
           return sendResponse({
             res,
@@ -273,12 +316,12 @@ exports.updateProfile = async (req, res) => {
         }
       }
     }
-    
+
     // Update user normally
     await User.updateOne({ _id: userId }, updates);
-    
+
     const user = await User.findById(userId).select('-password');
-    
+
     if (!user) {
       return sendResponse({
         res,
@@ -307,7 +350,7 @@ exports.updateProfile = async (req, res) => {
 exports.changePassword = async (req, res) => {
   try {
     const { currentPassword, newPassword } = req.body;
-    
+
     if (!currentPassword || !newPassword) {
       return sendResponse({
         res,
@@ -328,7 +371,7 @@ exports.changePassword = async (req, res) => {
 
     // Get user ID from req.user (set by verifyToken middleware)
     const userId = req.user._id;
-    
+
     // Find user with password field
     const user = await User.findById(userId).select('+password');
     if (!user) {
@@ -414,11 +457,11 @@ exports.getUsers = async (req, res) => {
     const excludeRole = req.query.excludeRole || ''; // Filter to exclude a role
     const staffOnly = req.query.staffOnly === 'true'; // Filter for staff only (non-customers)
     const customersOnly = req.query.customersOnly === 'true'; // Filter for customers only (role='customer' AND roleId is null)
-    
+
     // Build filter object
     const filter = {};
     const andConditions = [];
-    
+
     // Search filter
     if (search) {
       andConditions.push({
@@ -429,12 +472,12 @@ exports.getUsers = async (req, res) => {
         ]
       });
     }
-    
+
     // Status filter
     if (status) {
       filter.status = status;
     }
-    
+
     // Customers only filter (role='customer' AND roleId is null/doesn't exist)
     if (customersOnly) {
       andConditions.push({
@@ -466,13 +509,13 @@ exports.getUsers = async (req, res) => {
       // Role filter
       filter.role = role;
     }
-    
+
     // Combine all conditions with $and if needed
     if (andConditions.length > 0) {
       const baseFilter = { ...filter };
       // Clear filter to rebuild
       Object.keys(filter).forEach(key => delete filter[key]);
-      
+
       // Build $and array - only include baseFilter if it has properties
       if (Object.keys(baseFilter).length > 0) {
         filter.$and = [baseFilter, ...andConditions];
@@ -487,25 +530,25 @@ exports.getUsers = async (req, res) => {
         }
       }
     }
-    
+
     // Calculate skip value
     const skip = (page - 1) * limit;
-    
+
     // Get users with pagination
     const users = await User.find(filter)
       .select('-password') // Exclude password
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit);
-    
+
     // Get total count for pagination
     const total = await User.countDocuments(filter);
-    
+
     // Calculate pagination info
     const totalPages = Math.ceil(total / limit);
     const hasNextPage = page < totalPages;
     const hasPrevPage = page > 1;
-    
+
     return sendResponse({
       res,
       statusCode: 200,
@@ -535,9 +578,9 @@ exports.getUsers = async (req, res) => {
 exports.getUserById = async (req, res) => {
   try {
     const { id } = req.params;
-    
+
     const user = await User.findById(id).select('-password');
-    
+
     if (!user) {
       return sendResponse({
         res,
@@ -546,7 +589,7 @@ exports.getUserById = async (req, res) => {
         message: 'User not found',
       });
     }
-    
+
     return sendResponse({
       res,
       statusCode: 200,
@@ -569,32 +612,32 @@ exports.updateUserById = async (req, res) => {
   try {
     const { id } = req.params;
     const { name, phone, address, status, role } = req.body;
-    
-    
+
+
     const updates = {};
-    
+
     if (name) {
       updates.name = name;
     }
-    
+
     if (phone) {
       updates.phone = phone;
     }
-    
+
     if (address !== undefined) {
       updates.address = address;
     }
-    
+
     if (status) {
       updates.status = status;
     }
-    
+
     if (role) {
       updates.role = role;
     }
-    
+
     const existingUser = await User.findOne({ phone: phone, _id: { $ne: id } });
-    
+
     if (existingUser) {
       return sendResponse({
         res,
@@ -603,10 +646,10 @@ exports.updateUserById = async (req, res) => {
         message: 'Phone number already exists for another user',
       });
     }
-    
+
     const updatedUser = await User.updateOne({ _id: id }, updates);
-    
-    
+
+
     if (!updatedUser) {
       return sendResponse({
         res,
@@ -615,7 +658,7 @@ exports.updateUserById = async (req, res) => {
         message: 'User not found',
       });
     }
-    
+
     return sendResponse({
       res,
       statusCode: 200,
@@ -637,16 +680,16 @@ exports.updateUserById = async (req, res) => {
 exports.softDeleteUser = async (req, res) => {
   try {
     const { id } = req.params;
-    
+
     const user = await User.findByIdAndUpdate(
       id,
-      { 
+      {
         status: 'deleted',
         deletedAt: new Date()
       },
       { new: true }
     ).select('-password');
-    
+
     if (!user) {
       return sendResponse({
         res,
@@ -655,7 +698,7 @@ exports.softDeleteUser = async (req, res) => {
         message: 'User not found',
       });
     }
-    
+
     return sendResponse({
       res,
       statusCode: 200,
@@ -693,8 +736,8 @@ exports.searchUsers = async (req, res) => {
         { phone: { $regex: query, $options: 'i' } }
       ]
     })
-    .select('name email phone address addresses')
-    .limit(5);
+      .select('name email phone address addresses')
+      .limit(5);
 
     return sendResponse({
       res,
@@ -718,7 +761,7 @@ exports.uploadProfilePicture = async (req, res) => {
   try {
     uploadSingle(req, res, async (err) => {
       if (err) {
-        return handleUploadError(err, req, res, () => {});
+        return handleUploadError(err, req, res, () => { });
       }
 
       if (!req.file) {
