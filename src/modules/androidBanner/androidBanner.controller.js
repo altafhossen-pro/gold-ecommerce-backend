@@ -41,25 +41,25 @@ const getAllAndroidBanners = async (req, res) => {
     }
 };
 
-// Get active android banners (public/android app)
+// Get android banners (public/android app)
 const getActiveAndroidBanners = async (req, res) => {
     try {
         const { page = 1, limit = 10 } = req.query;
         const skip = (parseInt(page) - 1) * parseInt(limit);
 
-        const banners = await AndroidBanner.find({ isActive: true })
+        const banners = await AndroidBanner.find()
             .sort({ createdAt: -1 })
             .skip(skip)
             .limit(parseInt(limit))
             .select('-__v');
 
-        const total = await AndroidBanner.countDocuments({ isActive: true });
+        const total = await AndroidBanner.countDocuments();
 
         return sendResponse({
             res,
             statusCode: 200,
             success: true,
-            message: 'Active android banners retrieved successfully',
+            message: 'Android banners retrieved successfully',
             data: {
                 banners,
                 pagination: {
@@ -71,7 +71,7 @@ const getActiveAndroidBanners = async (req, res) => {
             }
         });
     } catch (error) {
-        console.error('Error fetching active android banners:', error);
+        console.error('Error fetching android banners:', error);
         return sendResponse({
             res,
             statusCode: 500,

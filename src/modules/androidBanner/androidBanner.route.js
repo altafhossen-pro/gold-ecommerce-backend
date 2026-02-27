@@ -12,7 +12,7 @@ const {
 const verifyTokenAdmin = require('../../middlewares/verifyTokenAdmin');
 
 // Public routes
-router.get('/active', getActiveAndroidBanners);
+router.get('/get-all-banners', getActiveAndroidBanners);
 
 // Admin routes
 router.get('/', verifyTokenAdmin, getAllAndroidBanners);
