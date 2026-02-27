@@ -201,15 +201,14 @@ exports.verifyOTP = async (req, res) => {
     let isNewUser = false;
 
     if (!user) {
-      // Create new user account automatically (email is optional in model)
-      // Generate a random password (user won't need it for phone login)
+      // Create new user account automatically
       const bcrypt = require('bcryptjs');
       const randomPassword = Math.random().toString(36).slice(-12) + Date.now().toString(36);
       const hashedPassword = await bcrypt.hash(randomPassword, 10);
 
       user = new User({
         phone,
-        // email is optional, so we don't set it
+        // email: undefined, // Fully omitting it for sparse index
         password: hashedPassword,
         phoneVerified: true,
         registerType: 'phone', // Track that user registered via phone/OTP
@@ -217,6 +216,10 @@ exports.verifyOTP = async (req, res) => {
         role: 'customer', // Default role
         status: 'active', // Default status
       });
+
+      // Explicitly set email to undefined to ensure it's not saved as null
+      user.email = undefined;
+
       await user.save();
       isNewUser = true;
     } else {
