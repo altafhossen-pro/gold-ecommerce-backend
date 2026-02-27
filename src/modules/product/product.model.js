@@ -104,8 +104,8 @@ const productSchema = new mongoose.Schema({
   // Jewelry specific properties
   isBracelet: { type: Boolean, default: false },
   isRing: { type: Boolean, default: false },
-  braceletSizes: [{ type: String }], 
-  ringSizes: [{ type: String }], 
+  braceletSizes: [{ type: String }],
+  ringSizes: [{ type: String }],
   featuredImage: { type: String },
   gallery: [productImageSchema],
   productVideos: { type: [String], default: [] },

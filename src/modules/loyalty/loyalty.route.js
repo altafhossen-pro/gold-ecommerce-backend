@@ -3,7 +3,7 @@ const router = express.Router();
 const loyaltyController = require('./loyalty.controller');
 const verifyToken = require('../../middlewares/verifyToken');
 
-router.get('/', loyaltyController.getLoyalty);
+router.get('/', verifyToken, loyaltyController.getLoyalty);
 router.post('/earn', verifyToken, loyaltyController.earnPoints);
 router.post('/redeem', verifyToken, loyaltyController.redeemPoints);
 router.get('/history', verifyToken, loyaltyController.getHistory);

@@ -7,12 +7,14 @@ const {
     createOfferBanner,
     updateOfferBanner,
     deleteOfferBanner,
-    toggleBannerStatus
+    toggleBannerStatus,
+    getAndroidAllBanners
 } = require('./offerBanner.controller');
 const verifyTokenAdmin = require('../../middlewares/verifyTokenAdmin');
 
 // Public routes
 router.get('/active', getActiveOfferBanner);
+router.get('/android-all-banners', getAndroidAllBanners);
 
 // Admin routes
 router.get('/', verifyTokenAdmin, getAllOfferBanners);

@@ -29,6 +29,8 @@ const affiliateRoutes = require('../modules/affiliate/affiliate.route');
 const contactRoutes = require('../modules/contact/contact.route');
 const notificationRoutes = require('../modules/notification/notification.route');
 
+const androidBannerRoutes = require('../modules/androidBanner/androidBanner.route');
+
 router.use('/user', userRoutes);
 router.use('/otp', otpRoutes);
 router.use('/auth/google', googleAuthRoutes);
@@ -40,6 +42,7 @@ router.use('/review', reviewRoutes);
 router.use('/loyalty', loyaltyRoutes);
 router.use('/settings', settingsRoutes);
 router.use('/offer-banner', offerBannerRoutes);
+router.use('/android-banner', androidBannerRoutes);
 router.use('/testimonial', testimonialRoutes);
 router.use('/admin/analytics', adminAnalyticsRoutes);
 router.use('/admin/user', adminUserRoutes);

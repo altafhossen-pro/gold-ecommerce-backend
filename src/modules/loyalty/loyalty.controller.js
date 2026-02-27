@@ -5,43 +5,49 @@ const sendResponse = require('../../utils/sendResponse');
 exports.getLoyalty = async (req, res) => {
   try {
     const { userId } = req.query;
+
+    // Check if the authenticated user is requesting their own data or is an admin
+    if (req.user._id.toString() !== userId && req.user.role !== 'admin') {
+      return sendResponse({ res, statusCode: 403, success: false, message: 'Forbidden: You cannot access this data' });
+    }
+
     const loyalty = await Loyalty.findOne({ user: userId });
-    
+
     // Get settings to calculate total value
     let settings = await Settings.findOne();
-    
+
     // If no settings exist, create default settings
     if (!settings) {
       settings = new Settings();
       await settings.save();
     }
-    
+
     const coinValue = settings?.loyaltySettings?.coinValue || 1;
-    
+
     if (!loyalty) {
-      return sendResponse({ 
-        res, 
-        statusCode: 200, 
-        success: true, 
-        message: 'Loyalty info fetched', 
-        data: { 
-          coins: 0, 
-          totalValue: 0, 
+      return sendResponse({
+        res,
+        statusCode: 200,
+        success: true,
+        message: 'Loyalty info fetched',
+        data: {
+          coins: 0,
+          totalValue: 0,
           coinValue: coinValue,
-          history: [] 
-        } 
+          history: []
+        }
       });
     }
-    
+
     const totalValue = loyalty.coins * coinValue;
-    
+
     const responseData = {
       coins: loyalty.coins,
       totalValue: totalValue,
       coinValue: coinValue,
       history: loyalty.history
     };
-    
+
     return sendResponse({ res, statusCode: 200, success: true, message: 'Loyalty info fetched', data: responseData });
   } catch (error) {
     return sendResponse({ res, statusCode: 500, success: false, message: error.message });
@@ -53,7 +59,7 @@ exports.earnPoints = async (req, res) => {
     const { userId, coins, order, description } = req.body;
     let loyalty = await Loyalty.findOne({ user: userId });
     if (!loyalty) loyalty = new Loyalty({ user: userId, points: 0, coins: 0, history: [] });
-    
+
     loyalty.coins += coins || 0;
     loyalty.history.unshift({ type: 'earn', points: 0, coins: coins || 0, order, description });
     await loyalty.save();
@@ -67,27 +73,27 @@ exports.redeemPoints = async (req, res) => {
   try {
     const { userId, coins, order, description } = req.body;
     let loyalty = await Loyalty.findOne({ user: userId });
-    
+
     // Check if user has enough coins
     if (!loyalty) {
       return sendResponse({ res, statusCode: 400, success: false, message: 'No loyalty account found' });
     }
-    
+
     if (coins && loyalty.coins < coins) {
       return sendResponse({ res, statusCode: 400, success: false, message: 'Not enough coins' });
     }
-    
+
     // Deduct coins
     if (coins) loyalty.coins -= coins;
-    
-    loyalty.history.unshift({ 
-      type: 'redeem', 
-      points: 0, 
-      coins: coins || 0, 
-      order, 
-      description 
+
+    loyalty.history.unshift({
+      type: 'redeem',
+      points: 0,
+      coins: coins || 0,
+      order,
+      description
     });
-    
+
     await loyalty.save();
     return sendResponse({ res, statusCode: 200, success: true, message: 'Coins redeemed', data: loyalty });
   } catch (error) {
@@ -98,21 +104,27 @@ exports.redeemPoints = async (req, res) => {
 exports.getHistory = async (req, res) => {
   try {
     const { userId, limit = 10 } = req.query;
+
+    // Check if the authenticated user is requesting their own data or is an admin
+    if (req.user._id.toString() !== userId && req.user.role !== 'admin') {
+      return sendResponse({ res, statusCode: 403, success: false, message: 'Forbidden: You cannot access this data' });
+    }
+
     const loyalty = await Loyalty.findOne({ user: userId }).populate('history.order', 'orderId');
-    
+
     if (!loyalty || !loyalty.history || loyalty.history.length === 0) {
       return sendResponse({ res, statusCode: 200, success: true, message: 'Loyalty history fetched', data: [] });
     }
-    
+
     // History is already sorted (newest first) since we use unshift()
     // Just limit the results
     const sortedHistory = loyalty.history.slice(0, parseInt(limit));
-    
-    return sendResponse({ 
-      res, 
-      statusCode: 200, 
-      success: true, 
-      message: 'Loyalty history fetched', 
+
+    return sendResponse({
+      res,
+      statusCode: 200,
+      success: true,
+      message: 'Loyalty history fetched',
       data: sortedHistory,
       total: loyalty.history.length,
       showing: sortedHistory.length
@@ -127,7 +139,7 @@ exports.adjustPoints = async (req, res) => {
     const { userId, points, coins, description } = req.body;
     let loyalty = await Loyalty.findOne({ user: userId });
     if (!loyalty) loyalty = new Loyalty({ user: userId, points: 0, coins: 0, history: [] });
-    
+
     loyalty.points += points || 0;
     loyalty.coins += coins || 0;
     loyalty.history.unshift({ type: 'adjust', points: points || 0, coins: coins || 0, description });
@@ -149,10 +161,10 @@ exports.earnCoinsFromOrder = async (userId, orderId, orderItems, reason = 'order
 
     // Calculate total items
     const totalItems = orderItems.reduce((sum, item) => sum + item.quantity, 0);
-    
+
     // Calculate coins to earn (1 coin per item)
     const coinsToEarn = totalItems * settings.loyaltySettings.coinPerItem;
-    
+
     if (coinsToEarn <= 0) {
       return { success: false, message: 'No coins to earn' };
     }

@@ -98,7 +98,7 @@ exports.getCouponById = async (req, res) => {
 exports.getPublicCoupons = async (req, res) => {
   try {
     const { limit = 20 } = req.query;
-    
+
     // Filter for publicly visible, active, and non-expired coupons
     const filter = {
       isActive: true,
@@ -147,7 +147,7 @@ exports.validateCoupon = async (req, res) => {
       });
     }
 
-    const coupon = await Coupon.findOne({ 
+    const coupon = await Coupon.findOne({
       code: code.toUpperCase(),
       isActive: true,
       endDate: { $gt: new Date() }
@@ -321,7 +321,7 @@ exports.updateCoupon = async (req, res) => {
       updateData,
       { new: true, runValidators: true }
     ).populate('createdBy', 'name email')
-     .populate('updatedBy', 'name email');
+      .populate('updatedBy', 'name email');
 
     if (!coupon) {
       return sendResponse({

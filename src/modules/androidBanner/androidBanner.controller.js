@@ -1,79 +1,25 @@
 const sendResponse = require('../../utils/sendResponse');
-const OfferBanner = require('./offerBanner.model');
+const AndroidBanner = require('./androidBanner.model');
 
-// Get all offer banners (admin)
-const getAllOfferBanners = async (req, res) => {
-    try {
-        const banners = await OfferBanner.find()
-            .sort({ createdAt: -1 })
-            .select('-__v');
-
-        return sendResponse({
-            res,
-            statusCode: 200,
-            success: true,
-            message: 'Offer banners retrieved successfully',
-            data: banners
-        });
-    } catch (error) {
-        console.error('Error fetching offer banners:', error);
-        return sendResponse({
-            res,
-            statusCode: 500,
-            success: false,
-            message: 'Internal server error'
-        });
-    }
-};
-
-// Get active offer banner (frontend)
-const getActiveOfferBanner = async (req, res) => {
-    try {
-        const banner = await OfferBanner.findOne({
-            isActive: true
-        });
-
-        if (!banner) {
-            return sendResponse({
-                res,
-                statusCode: 200,
-                success: true,
-                data: null,
-                message: 'No active offer banner found'
-            });
-        }
-
-        return sendResponse({
-            res,
-            statusCode: 200,
-            success: true,
-            message: 'Active offer banner retrieved successfully',
-            data: banner
-        });
-    } catch (error) {
-        console.error('Error fetching active offer banner:', error);
-        return sendResponse(res, 500, false, 'Internal server error');
-    }
-};
-
-const getAndroidAllBanners = async (req, res) => {
+// Get all android banners (admin)
+const getAllAndroidBanners = async (req, res) => {
     try {
         const { page = 1, limit = 10 } = req.query;
         const skip = (parseInt(page) - 1) * parseInt(limit);
 
-        const banners = await OfferBanner.find()
+        const banners = await AndroidBanner.find()
             .sort({ createdAt: -1 })
             .skip(skip)
             .limit(parseInt(limit))
             .select('-__v');
 
-        const total = await OfferBanner.countDocuments();
+        const total = await AndroidBanner.countDocuments();
 
         return sendResponse({
             res,
             statusCode: 200,
             success: true,
-            message: 'All offer banners retrieved successfully',
+            message: 'Android banners retrieved successfully',
             data: {
                 banners,
                 pagination: {
@@ -85,7 +31,7 @@ const getAndroidAllBanners = async (req, res) => {
             }
         });
     } catch (error) {
-        console.error('Error fetching all offer banners:', error);
+        console.error('Error fetching android banners:', error);
         return sendResponse({
             res,
             statusCode: 500,
@@ -95,18 +41,58 @@ const getAndroidAllBanners = async (req, res) => {
     }
 };
 
-// Get single offer banner by ID
-const getOfferBannerById = async (req, res) => {
+// Get active android banners (public/android app)
+const getActiveAndroidBanners = async (req, res) => {
+    try {
+        const { page = 1, limit = 10 } = req.query;
+        const skip = (parseInt(page) - 1) * parseInt(limit);
+
+        const banners = await AndroidBanner.find({ isActive: true })
+            .sort({ createdAt: -1 })
+            .skip(skip)
+            .limit(parseInt(limit))
+            .select('-__v');
+
+        const total = await AndroidBanner.countDocuments({ isActive: true });
+
+        return sendResponse({
+            res,
+            statusCode: 200,
+            success: true,
+            message: 'Active android banners retrieved successfully',
+            data: {
+                banners,
+                pagination: {
+                    totalItems: total,
+                    currentPage: parseInt(page),
+                    limit: parseInt(limit),
+                    totalPages: Math.ceil(total / limit)
+                }
+            }
+        });
+    } catch (error) {
+        console.error('Error fetching active android banners:', error);
+        return sendResponse({
+            res,
+            statusCode: 500,
+            success: false,
+            message: 'Internal server error'
+        });
+    }
+};
+
+// Get single android banner by ID
+const getAndroidBannerById = async (req, res) => {
     try {
         const { id } = req.params;
-        const banner = await OfferBanner.findById(id).select('-__v');
+        const banner = await AndroidBanner.findById(id).select('-__v');
 
         if (!banner) {
             return sendResponse({
                 res,
                 statusCode: 404,
                 success: false,
-                message: 'Offer banner not found'
+                message: 'Android banner not found'
             });
         }
 
@@ -114,11 +100,11 @@ const getOfferBannerById = async (req, res) => {
             res,
             statusCode: 200,
             success: true,
-            message: 'Offer banner retrieved successfully',
+            message: 'Android banner retrieved successfully',
             data: banner
         });
     } catch (error) {
-        console.error('Error fetching offer banner:', error);
+        console.error('Error fetching android banner:', error);
         return sendResponse({
             res,
             statusCode: 500,
@@ -128,36 +114,22 @@ const getOfferBannerById = async (req, res) => {
     }
 };
 
-// Create new offer banner
-const createOfferBanner = async (req, res) => {
+// Create new android banner
+const createAndroidBanner = async (req, res) => {
     try {
         const bannerData = req.body;
-
-        // Clean undefined and null values
-        const cleanedData = {};
-        Object.keys(bannerData).forEach(key => {
-            if (bannerData[key] !== undefined && bannerData[key] !== null) {
-                cleanedData[key] = bannerData[key];
-            }
-        });
-
-        // If this banner is being set as active, deactivate others
-        if (cleanedData.isActive) {
-            await OfferBanner.updateMany({ isActive: true }, { isActive: false });
-        }
-
-        const banner = new OfferBanner(cleanedData);
+        const banner = new AndroidBanner(bannerData);
         await banner.save();
 
         return sendResponse({
             res,
             statusCode: 201,
             success: true,
-            message: 'Offer banner created successfully',
+            message: 'Android banner created successfully',
             data: banner
         });
     } catch (error) {
-        console.error('Error creating offer banner:', error);
+        console.error('Error creating android banner:', error);
         if (error.name === 'ValidationError') {
             const errors = Object.values(error.errors).map(err => err.message);
             return sendResponse({
@@ -177,31 +149,15 @@ const createOfferBanner = async (req, res) => {
     }
 };
 
-// Update offer banner
-const updateOfferBanner = async (req, res) => {
+// Update android banner
+const updateAndroidBanner = async (req, res) => {
     try {
         const { id } = req.params;
         const updateData = req.body;
 
-        // Clean undefined and null values
-        const cleanedData = {};
-        Object.keys(updateData).forEach(key => {
-            if (updateData[key] !== undefined && updateData[key] !== null) {
-                cleanedData[key] = updateData[key];
-            }
-        });
-
-        // If this banner is being set as active, deactivate others
-        if (cleanedData.isActive) {
-            await OfferBanner.updateMany(
-                { _id: { $ne: id }, isActive: true },
-                { isActive: false }
-            );
-        }
-
-        const banner = await OfferBanner.findByIdAndUpdate(
+        const banner = await AndroidBanner.findByIdAndUpdate(
             id,
-            cleanedData,
+            updateData,
             { new: true, runValidators: true }
         ).select('-__v');
 
@@ -210,7 +166,7 @@ const updateOfferBanner = async (req, res) => {
                 res,
                 statusCode: 404,
                 success: false,
-                message: 'Offer banner not found'
+                message: 'Android banner not found'
             });
         }
 
@@ -218,11 +174,11 @@ const updateOfferBanner = async (req, res) => {
             res,
             statusCode: 200,
             success: true,
-            message: 'Offer banner updated successfully',
+            message: 'Android banner updated successfully',
             data: banner
         });
     } catch (error) {
-        console.error('Error updating offer banner:', error);
+        console.error('Error updating android banner:', error);
         if (error.name === 'ValidationError') {
             const errors = Object.values(error.errors).map(err => err.message);
             return sendResponse({
@@ -242,18 +198,18 @@ const updateOfferBanner = async (req, res) => {
     }
 };
 
-// Delete offer banner
-const deleteOfferBanner = async (req, res) => {
+// Delete android banner
+const deleteAndroidBanner = async (req, res) => {
     try {
         const { id } = req.params;
-        const banner = await OfferBanner.findByIdAndDelete(id);
+        const banner = await AndroidBanner.findByIdAndDelete(id);
 
         if (!banner) {
             return sendResponse({
                 res,
                 statusCode: 404,
                 success: false,
-                message: 'Offer banner not found'
+                message: 'Android banner not found'
             });
         }
 
@@ -261,10 +217,10 @@ const deleteOfferBanner = async (req, res) => {
             res,
             statusCode: 200,
             success: true,
-            message: 'Offer banner deleted successfully'
+            message: 'Android banner deleted successfully'
         });
     } catch (error) {
-        console.error('Error deleting offer banner:', error);
+        console.error('Error deleting android banner:', error);
         return sendResponse({
             res,
             statusCode: 500,
@@ -278,20 +234,15 @@ const deleteOfferBanner = async (req, res) => {
 const toggleBannerStatus = async (req, res) => {
     try {
         const { id } = req.params;
-        const banner = await OfferBanner.findById(id);
+        const banner = await AndroidBanner.findById(id);
 
         if (!banner) {
             return sendResponse({
                 res,
                 statusCode: 404,
                 success: false,
-                message: 'Offer banner not found'
+                message: 'Android banner not found'
             });
-        }
-
-        // If activating this banner, deactivate others
-        if (!banner.isActive) {
-            await OfferBanner.updateMany({ _id: { $ne: id }, isActive: true }, { isActive: false });
         }
 
         banner.isActive = !banner.isActive;
@@ -316,12 +267,11 @@ const toggleBannerStatus = async (req, res) => {
 };
 
 module.exports = {
-    getAllOfferBanners,
-    getActiveOfferBanner,
-    getOfferBannerById,
-    createOfferBanner,
-    updateOfferBanner,
-    deleteOfferBanner,
-    toggleBannerStatus,
-    getAndroidAllBanners
+    getAllAndroidBanners,
+    getActiveAndroidBanners,
+    getAndroidBannerById,
+    createAndroidBanner,
+    updateAndroidBanner,
+    deleteAndroidBanner,
+    toggleBannerStatus
 };
