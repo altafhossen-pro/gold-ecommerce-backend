@@ -39,10 +39,16 @@ const verifyToken = async (req, res, next) => {
             });
         }
         
-        // Verify token using service
-        const decoded = jwtService.verifyToken(token);
+        // Verify token using service (this may throw JWT errors)
+        let decoded;
+        try {
+            decoded = jwtService.verifyToken(token);
+        } catch (jwtError) {
+            // Re-throw JWT errors to be caught by outer catch block
+            throw jwtError;
+        }
 
-        if (!decoded.userId) {
+        if (!decoded || !decoded.userId) {
             return sendResponse({
                 res,
                 statusCode: 401,
@@ -51,6 +57,7 @@ const verifyToken = async (req, res, next) => {
             });
         }
 
+        // Find user in database (may throw database errors)
         const user = await User.findById(decoded.userId).select('-password');
 
         if (!user) {
@@ -107,7 +114,47 @@ const verifyToken = async (req, res, next) => {
             });
         }
 
-        // General server error
+        // Handle Mongoose CastError (invalid ObjectId)
+        if (error.name === 'CastError' || error.kind === 'ObjectId') {
+            return sendResponse({
+                res,
+                statusCode: 401,
+                success: false,
+                message: 'Invalid token. User ID is invalid'
+            });
+        }
+
+        // Handle database connection errors
+        if (error.name === 'MongoError' || error.name === 'MongooseError') {
+            return sendResponse({
+                res,
+                statusCode: 503,
+                success: false,
+                message: 'Database connection error. Please try again later'
+            });
+        }
+
+        // Handle error messages from jwtService
+        if (error.message && error.message.includes('Token')) {
+            if (error.message.includes('expired')) {
+                return sendResponse({
+                    res,
+                    statusCode: 401,
+                    success: false,
+                    message: 'Token has expired. Please login again'
+                });
+            }
+            if (error.message.includes('Invalid')) {
+                return sendResponse({
+                    res,
+                    statusCode: 401,
+                    success: false,
+                    message: 'Invalid token'
+                });
+            }
+        }
+
+        // General server error (only for unexpected errors)
         return sendResponse({
             res,
             statusCode: 500,

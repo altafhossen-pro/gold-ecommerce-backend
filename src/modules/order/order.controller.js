@@ -14,6 +14,7 @@ const { sendCustomSMS } = require('../../utils/smsService');
 const { Affiliate } = require('../affiliate/affiliate.model');
 const { AffiliateTracking } = require('../affiliate/affiliateTracking.model');
 const steadfastService = require('../steadfast/steadfast.service');
+const mongoose = require('mongoose');
 
 exports.createOrder = async (req, res) => {
   try {
@@ -24,6 +25,178 @@ exports.createOrder = async (req, res) => {
     // Set user from authenticated token
     orderData.user = req.user._id;
     orderData.isGuestOrder = false;
+
+    // Validate order items and product IDs
+    if (!orderData.items || !Array.isArray(orderData.items) || orderData.items.length === 0) {
+      return sendResponse({
+        res,
+        statusCode: 400,
+        success: false,
+        message: 'Order items are required'
+      });
+    }
+
+    // Validate each item's product ID
+    for (let i = 0; i < orderData.items.length; i++) {
+      const item = orderData.items[i];
+      
+      if (!item.product) {
+        return sendResponse({
+          res,
+          statusCode: 400,
+          success: false,
+          message: `Item ${i + 1}: Product ID is required`
+        });
+      }
+
+      // Check if product ID is a valid ObjectId
+      if (!mongoose.Types.ObjectId.isValid(item.product)) {
+        return sendResponse({
+          res,
+          statusCode: 400,
+          success: false,
+          message: `Item ${i + 1}: Invalid product ID format. Product ID must be a valid MongoDB ObjectId`
+        });
+      }
+
+      // Validate required fields
+      if (!item.name || !item.price || !item.quantity || !item.subtotal) {
+        return sendResponse({
+          res,
+          statusCode: 400,
+          success: false,
+          message: `Item ${i + 1}: Missing required fields (name, price, quantity, or subtotal)`
+        });
+      }
+
+      // Validate numeric fields
+      if (typeof item.price !== 'number' || item.price <= 0) {
+        return sendResponse({
+          res,
+          statusCode: 400,
+          success: false,
+          message: `Item ${i + 1}: Invalid price. Price must be a positive number`
+        });
+      }
+
+      if (typeof item.quantity !== 'number' || item.quantity <= 0 || !Number.isInteger(item.quantity)) {
+        return sendResponse({
+          res,
+          statusCode: 400,
+          success: false,
+          message: `Item ${i + 1}: Invalid quantity. Quantity must be a positive integer`
+        });
+      }
+
+      if (typeof item.subtotal !== 'number' || item.subtotal <= 0) {
+        return sendResponse({
+          res,
+          statusCode: 400,
+          success: false,
+          message: `Item ${i + 1}: Invalid subtotal. Subtotal must be a positive number`
+        });
+      }
+
+      // Validate subtotal matches price * quantity
+      const expectedSubtotal = item.price * item.quantity;
+      if (Math.abs(item.subtotal - expectedSubtotal) > 0.01) { // Allow small floating point differences
+        return sendResponse({
+          res,
+          statusCode: 400,
+          success: false,
+          message: `Item ${i + 1}: Subtotal mismatch. Expected ${expectedSubtotal} but received ${item.subtotal}`
+        });
+      }
+    }
+
+    // Validate product prices against actual product prices in database
+    for (let i = 0; i < orderData.items.length; i++) {
+      const item = orderData.items[i];
+      
+      try {
+        // Fetch product from database
+        const product = await Product.findById(item.product);
+        
+        if (!product) {
+          return sendResponse({
+            res,
+            statusCode: 400,
+            success: false,
+            message: `Item ${i + 1}: Product not found with ID ${item.product}`
+          });
+        }
+
+        // Check if product is active
+        if (!product.isActive || product.status !== 'published') {
+          return sendResponse({
+            res,
+            statusCode: 400,
+            success: false,
+            message: `Item ${i + 1}: Product "${product.title}" is not available for purchase`
+          });
+        }
+
+        // Determine actual price based on variant or base price
+        let actualPrice = null;
+        
+        // If variant SKU is provided, check variant price
+        if (item.variantSku && product.variants && product.variants.length > 0) {
+          const variant = product.variants.find(v => v.sku === item.variantSku);
+          
+          if (!variant) {
+            return sendResponse({
+              res,
+              statusCode: 400,
+              success: false,
+              message: `Item ${i + 1}: Variant with SKU "${item.variantSku}" not found for product "${product.title}"`
+            });
+          }
+
+          if (!variant.isActive) {
+            return sendResponse({
+              res,
+              statusCode: 400,
+              success: false,
+              message: `Item ${i + 1}: Variant "${item.variantSku}" is not active`
+            });
+          }
+
+          actualPrice = variant.currentPrice;
+        } else {
+          // No variant, use base price
+          actualPrice = product.basePrice;
+        }
+
+        // Validate price matches actual product price
+        if (actualPrice === null || actualPrice === undefined) {
+          return sendResponse({
+            res,
+            statusCode: 400,
+            success: false,
+            message: `Item ${i + 1}: Product "${product.title}" does not have a valid price`
+          });
+        }
+
+        // Allow small floating point differences (0.01)
+        if (Math.abs(item.price - actualPrice) > 0.01) {
+          return sendResponse({
+            res,
+            statusCode: 400,
+            success: false,
+            message: `Item ${i + 1}: Price mismatch for "${product.title}". Actual price is ${actualPrice} but received ${item.price}. Please refresh and try again.`
+          });
+        }
+
+      } catch (productError) {
+        // If product fetch fails, return error
+        return sendResponse({
+          res,
+          statusCode: 400,
+          success: false,
+          message: `Item ${i + 1}: Error validating product. ${productError.message}`
+        });
+      }
+    }
 
     // Validate address IDs if provided
     if (orderData.shippingAddress) {
@@ -137,6 +310,86 @@ exports.createOrder = async (req, res) => {
       }
     }
 
+    // Validate loyalty coins redemption BEFORE creating order
+    if (orderData.loyaltyPointsUsed && orderData.loyaltyPointsUsed > 0) {
+      // Get settings to validate coin value
+      const settings = await Settings.findOne();
+      if (!settings || !settings.loyaltySettings?.isLoyaltyEnabled) {
+        return sendResponse({
+          res,
+          statusCode: 400,
+          success: false,
+          message: 'Loyalty system is disabled'
+        });
+      }
+
+      // Validate coin amount
+      if (orderData.loyaltyPointsUsed <= 0) {
+        return sendResponse({
+          res,
+          statusCode: 400,
+          success: false,
+          message: 'Invalid coin amount'
+        });
+      }
+
+      // Get user's loyalty record
+      const loyalty = await Loyalty.findOne({ user: req.user._id });
+      if (!loyalty) {
+        return sendResponse({
+          res,
+          statusCode: 400,
+          success: false,
+          message: 'No loyalty account found'
+        });
+      }
+
+      // Check if user has enough coins
+      if (loyalty.coins < orderData.loyaltyPointsUsed) {
+        return sendResponse({
+          res,
+          statusCode: 400,
+          success: false,
+          message: `Insufficient coins. You have ${loyalty.coins} coins but trying to use ${orderData.loyaltyPointsUsed} coins`
+        });
+      }
+
+      // Validate loyaltyDiscount matches calculated discount
+      const expectedDiscount = Math.round(orderData.loyaltyPointsUsed * settings.loyaltySettings.coinValue);
+      // Allow small tolerance (1 Taka) for floating point differences
+      const discountDifference = Math.abs(orderData.loyaltyDiscount - expectedDiscount);
+      if (discountDifference > 1) {
+        return sendResponse({
+          res,
+          statusCode: 400,
+          success: false,
+          message: `Invalid loyalty discount. Expected ${expectedDiscount} but received ${orderData.loyaltyDiscount}. Discount should be ${orderData.loyaltyPointsUsed} coins × ${settings.loyaltySettings.coinValue} = ${expectedDiscount}`
+        });
+      }
+
+      // Validate minimum redeem amount (if subtotal is less than minimum)
+      const minRedeemAmount = settings.loyaltySettings?.minRedeemAmount || 1;
+      const orderSubtotal = orderData.items?.reduce((sum, item) => sum + (item.subtotal || 0), 0) || 0;
+      if (orderSubtotal < minRedeemAmount) {
+        return sendResponse({
+          res,
+          statusCode: 400,
+          success: false,
+          message: `Minimum order amount of ${minRedeemAmount} Taka required to use loyalty coins. Your order total is ${orderSubtotal} Taka`
+        });
+      }
+
+      // Validate that coins can cover the entire order (no partial payment)
+      if (orderData.total !== 0 && orderData.loyaltyDiscount < orderSubtotal) {
+        return sendResponse({
+          res,
+          statusCode: 400,
+          success: false,
+          message: 'Coins must cover the entire order. Partial payment with coins is not allowed'
+        });
+      }
+    }
+
     // Set default status to 'pending' for all orders
     orderData.status = 'pending';
     orderData.statusTimestamps = {
@@ -169,28 +422,40 @@ exports.createOrder = async (req, res) => {
     }
 
     // Handle loyalty points redemption after order creation
+    // Note: Validation already done before order creation, so this should always succeed
     if (orderData.loyaltyPointsUsed && orderData.loyaltyPointsUsed > 0) {
       try {
-
         const loyalty = await Loyalty.findOne({ user: req.user._id });
 
-        if (loyalty) {
-          // Deduct coins
-          loyalty.coins -= orderData.loyaltyPointsUsed;
+        if (!loyalty) {
+          // This should not happen as we validated before, but handle it just in case
+          console.error('Loyalty record not found during coin deduction for order:', order._id);
+          // Order is already created, so we log error but don't fail
+        } else {
+          // Double-check coins are still sufficient (in case of race condition)
+          if (loyalty.coins < orderData.loyaltyPointsUsed) {
+            console.error('Insufficient coins during deduction for order:', order._id);
+            // Order is already created, so we log error but don't fail
+          } else {
+            // Deduct coins
+            loyalty.coins -= orderData.loyaltyPointsUsed;
 
-          // Add history entry with actual order ID
-          loyalty.history.unshift({
-            type: 'redeem',
-            points: 0,
-            coins: orderData.loyaltyPointsUsed,
-            order: order._id,
-            description: `Redeemed ${orderData.loyaltyPointsUsed} coins for order payment`
-          });
+            // Add history entry with actual order ID
+            loyalty.history.unshift({
+              type: 'redeem',
+              points: 0,
+              coins: orderData.loyaltyPointsUsed,
+              order: order._id,
+              description: `Redeemed ${orderData.loyaltyPointsUsed} coins for order payment`
+            });
 
-          await loyalty.save();
+            await loyalty.save();
+          }
         }
       } catch (redeemError) {
-        // Don't fail the order creation if loyalty redemption fails
+        // Log error but don't fail order creation (order already saved)
+        // In production, you might want to implement order rollback or compensation logic
+        console.error('Error deducting coins for order:', order._id, redeemError);
       }
     }
 
@@ -354,6 +619,53 @@ exports.createOrder = async (req, res) => {
       data: order,
     });
   } catch (error) {
+    console.error('Order creation error:', error);
+
+    // Handle Mongoose validation errors
+    if (error.name === 'ValidationError') {
+      const errors = Object.values(error.errors).map(err => err.message).join(', ');
+      return sendResponse({
+        res,
+        statusCode: 400,
+        success: false,
+        message: `Order validation failed: ${errors}`,
+      });
+    }
+
+    // Handle Mongoose CastError (invalid ObjectId)
+    if (error.name === 'CastError') {
+      const field = error.path || 'unknown field';
+      const value = error.value || 'invalid value';
+      return sendResponse({
+        res,
+        statusCode: 400,
+        success: false,
+        message: `Invalid ${field}: "${value}" is not a valid ID format. Please provide a valid MongoDB ObjectId`,
+      });
+    }
+
+    // Handle duplicate key error (if orderId already exists)
+    if (error.code === 11000) {
+      const field = Object.keys(error.keyValue)[0];
+      return sendResponse({
+        res,
+        statusCode: 400,
+        success: false,
+        message: `Duplicate ${field}. This ${field} already exists`,
+      });
+    }
+
+    // Handle other known errors
+    if (error.message && error.message.includes('Cast to ObjectId')) {
+      return sendResponse({
+        res,
+        statusCode: 400,
+        success: false,
+        message: `Invalid ID format. Please provide a valid MongoDB ObjectId`,
+      });
+    }
+
+    // Generic server error
     return sendResponse({
       res,
       statusCode: 500,

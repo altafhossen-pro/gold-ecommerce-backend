@@ -66,11 +66,12 @@ class JWTService {
         try {
             return jwt.verify(token, this.secret);
         } catch (error) {
-            if (error.name === 'TokenExpiredError') {
-                throw new Error('Token has expired');
-            } else if (error.name === 'JsonWebTokenError') {
-                throw new Error('Invalid token');
+            // Preserve original error name and message for proper error handling
+            if (error.name === 'TokenExpiredError' || error.name === 'JsonWebTokenError' || error.name === 'NotBeforeError') {
+                // Re-throw original error to preserve error.name
+                throw error;
             } else {
+                // For other errors, throw generic error
                 throw new Error('Token verification failed');
             }
         }
