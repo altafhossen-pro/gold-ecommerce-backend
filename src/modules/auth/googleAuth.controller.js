@@ -230,3 +230,150 @@ exports.googleCallback = async (req, res) => {
   }
 };
 
+/**
+ * Handle Google Sign-In for Mobile Apps (Flutter/Android/iOS)
+ * Accepts ID token from Google Sign-In SDK
+ */
+exports.googleMobileAuth = async (req, res) => {
+  try {
+    const { idToken } = req.body;
+
+    if (!idToken) {
+      return sendResponse({
+        res,
+        statusCode: 400,
+        success: false,
+        message: 'ID token is required',
+      });
+    }
+
+    // Verify ID token with Google
+    const tokenInfoResponse = await axios.get(`https://oauth2.googleapis.com/tokeninfo?id_token=${idToken}`);
+    const tokenInfo = tokenInfoResponse.data;
+
+    // Validate token
+    if (!tokenInfo || tokenInfo.error) {
+      return sendResponse({
+        res,
+        statusCode: 401,
+        success: false,
+        message: 'Invalid ID token',
+      });
+    }
+
+    // Extract user info from token
+    const { sub: googleId, email, name, picture } = tokenInfo;
+
+    if (!email) {
+      return sendResponse({
+        res,
+        statusCode: 400,
+        success: false,
+        message: 'Email not provided by Google',
+      });
+    }
+
+    // Check if user exists by email
+    let user = await User.findOne({ email: email.toLowerCase() });
+    let isNewUser = false;
+
+    if (!user) {
+      // Create new user
+      const randomPassword = Math.random().toString(36).slice(-12) + Date.now().toString(36);
+      const hashedPassword = await bcrypt.hash(randomPassword, 10);
+
+      user = new User({
+        name: name || email.split('@')[0],
+        email: email.toLowerCase(),
+        password: hashedPassword,
+        avatar: picture || null,
+        emailVerified: true,
+        registerType: 'google',
+        role: 'customer',
+        status: 'active',
+        googleId: googleId,
+      });
+
+      await user.save();
+      isNewUser = true;
+    } else {
+      // Update existing user with Google info if needed
+      if (!user.googleId) {
+        user.googleId = googleId;
+      }
+      if (picture && !user.avatar) {
+        user.avatar = picture;
+      }
+      user.emailVerified = true;
+      user.lastLogin = new Date();
+      await user.save();
+    }
+
+    // Get signup bonus coins amount for welcome email
+    let signupBonusCoins = 0;
+    
+    // Give signup bonus coins to new users only
+    if (isNewUser) {
+      try {
+        const settings = await Settings.findOne();
+        if (settings && settings.loyaltySettings?.isLoyaltyEnabled && settings.loyaltySettings?.signupBonusCoins > 0) {
+          signupBonusCoins = settings.loyaltySettings.signupBonusCoins;
+          
+          // Get or create loyalty record
+          let loyalty = await Loyalty.findOne({ user: user._id });
+          if (!loyalty) {
+            loyalty = new Loyalty({ user: user._id, points: 0, coins: 0, history: [] });
+          }
+          
+          // Add signup bonus coins
+          loyalty.coins += signupBonusCoins;
+          loyalty.history.unshift({
+            type: 'earn',
+            points: 0,
+            coins: signupBonusCoins,
+            description: `Welcome bonus: ${signupBonusCoins} coins for signing up`
+          });
+          
+          await loyalty.save();
+        }
+      } catch (error) {
+        // Don't fail Google auth if loyalty bonus fails
+        console.error('Error giving signup bonus:', error);
+      }
+    }
+
+    // Generate JWT token
+    const token = jwtService.generateAccessToken(user._id);
+
+    // Remove password from user object
+    const userObj = user.toObject();
+    delete userObj.password;
+
+    // Send welcome email asynchronously to new users
+    if (isNewUser && user.email) {
+      sendWelcomeEmail(user, signupBonusCoins).catch(emailError => {
+        console.error('Failed to send welcome email:', emailError);
+      });
+    }
+
+    return sendResponse({
+      res,
+      statusCode: 200,
+      success: true,
+      message: isNewUser ? 'User registered and logged in successfully' : 'User logged in successfully',
+      data: {
+        token,
+        user: userObj,
+        isNewUser,
+      },
+    });
+
+  } catch (error) {
+    return sendResponse({
+      res,
+      statusCode: 500,
+      success: false,
+      message: error.message || 'Google authentication failed',
+    });
+  }
+};
